@@ -58,6 +58,11 @@ cc_library(
         "include/libxsmm_*.h",
         # trigger rebuild if template changed
         "src/template/*.c",
+    ], exclude=[
+        # exclude existing/generated headers
+        "include/libxsmm.h",
+        "include/libxsmm_config.h",
+        "include/libxsmm_dispatch.h",
     ]) + [
         # source files included internally
         "src/libxsmm_gemm_diff.c",
