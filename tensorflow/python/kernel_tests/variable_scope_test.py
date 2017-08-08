@@ -83,6 +83,16 @@ class VariableScopeTest(test.TestCase):
           sess.run(variables_lib.initialize_variables([w]))
           self.assertAllClose(w.eval(), 0.3)
 
+  def testVarScopeConstraint(self):
+    constraint = lambda x: 0. * x
+    with variable_scope.variable_scope("tower") as tower:
+      with variable_scope.variable_scope("foo", constraint=constraint):
+        v = variable_scope.get_variable("v", [])
+        self.assertEqual(v.constraint, constraint)
+      with variable_scope.variable_scope(tower, constraint=constraint):
+        w = variable_scope.get_variable("w", [])
+        self.assertEqual(w.constraint, constraint)
+
   def testVarScopeDType(self):
     with self.test_session():
       with variable_scope.variable_scope("tower") as tower:
@@ -115,7 +125,7 @@ class VariableScopeTest(test.TestCase):
           dtypes.int64, dtypes.bool
       ]
 
-      # Use different varibale_name to distinguish various dtypes
+      # Use different variable_name to distinguish various dtypes
       for (i, dtype) in enumerate(types):
         x = variable_scope.get_variable(
             name="x%d" % i, shape=(3, 4), dtype=dtype)
@@ -807,7 +817,7 @@ class VariableScopeWithPartitioningTest(test.TestCase):
           dtypes.int64, dtypes.bool
       ]
 
-      # Use different varibale_name to distinguish various dtypes
+      # Use different variable_name to distinguish various dtypes
       for (i, dtype) in enumerate(types):
         x = variable_scope.get_variable(
             name="x%d" % i,

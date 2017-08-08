@@ -57,6 +57,8 @@ class Dense(base.Layer):
       linear activation.
     use_bias: Boolean, whether the layer uses a bias.
     kernel_initializer: Initializer function for the weight matrix.
+      If `None` (default), weights are initialized using the default
+      initializer used by `tf.get_variable`.
     bias_initializer: Initializer function for the bias.
     kernel_regularizer: Regularizer function for the weight matrix.
     bias_regularizer: Regularizer function for the bias.
@@ -186,6 +188,8 @@ def dense(
       linear activation.
     use_bias: Boolean, whether the layer uses a bias.
     kernel_initializer: Initializer function for the weight matrix.
+      If `None` (default), weights are initialized using the default
+      initializer used by `tf.get_variable`.
     bias_initializer: Initializer function for the bias.
     kernel_regularizer: Regularizer function for the weight matrix.
     bias_regularizer: Regularizer function for the bias.
@@ -244,7 +248,7 @@ class Dropout(base.Layer):
                name=None,
                **kwargs):
     super(Dropout, self).__init__(name=name, **kwargs)
-    self.rate = min(1., max(0., rate))
+    self.rate = rate
     self.noise_shape = noise_shape
     self.seed = seed
 

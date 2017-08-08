@@ -27,6 +27,8 @@ limitations under the License.
 
 namespace tensorflow {
 
+static constexpr const char* const kNoInlineAttr = "_noinline";
+
 // Registers a default customizable kernel creator for a function call.
 //
 // If 'cb()' returns a non-OK, we still fall back to an executor-based
@@ -48,7 +50,7 @@ void RegisterDefaultCustomKernelCreator(CustomKernelCreator cb);
 // The returned object does not take ownerships of "device" or
 // "lib_def".  The caller must ensure "device" and "lib_def" outlives
 // the returned object.
-FunctionLibraryRuntime* NewFunctionLibraryRuntime(
+std::unique_ptr<FunctionLibraryRuntime> NewFunctionLibraryRuntime(
     const DeviceMgr* device_mgr, Env* env, Device* device,
     int graph_def_version, const FunctionLibraryDefinition* lib_def,
     const OptimizerOptions& optimizer_options,
@@ -57,7 +59,7 @@ FunctionLibraryRuntime* NewFunctionLibraryRuntime(
 // Same as above except that the returned runtime consults with the
 // global default custom kernel creator registered by
 // RegisterDefaultCustomKernelCreator.
-FunctionLibraryRuntime* NewFunctionLibraryRuntime(
+std::unique_ptr<FunctionLibraryRuntime> NewFunctionLibraryRuntime(
     const DeviceMgr* device_mgr, Env* env, Device* device,
     int graph_def_version, const FunctionLibraryDefinition* lib_def,
     const OptimizerOptions& optimizer_options);
