@@ -22,8 +22,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/client/computation_builder.h"
 #include "tensorflow/compiler/xla/client/global_data.h"
 #include "tensorflow/compiler/xla/layout_util.h"
-#include "tensorflow/compiler/xla/legacy_flags/cpu_compiler_flags.h"
-#include "tensorflow/compiler/xla/legacy_flags/hlo_pass_pipeline_flags.h"
 #include "tensorflow/compiler/xla/literal_util.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/status_macros.h"
@@ -46,14 +44,8 @@ ClientType client_types[] = {ClientType::kLocal, ClientType::kCompileOnly};
 class ComputeConstantTest : public ::testing::Test {
  public:
   explicit ComputeConstantTest(
-      perftools::gputools::Platform* platform = nullptr,
-      tensorflow::gtl::ArraySlice<string> disabled_pass_names = {})
-      : platform_(platform) {
-    legacy_flags::HloPassPipelineFlags* flags =
-        legacy_flags::GetHloPassPipelineFlags();
-    flags->xla_disable_hlo_passes =
-        tensorflow::str_util::Join(disabled_pass_names, ",");
-  }
+      perftools::gputools::Platform* platform = nullptr)
+      : platform_(platform) {}
 
   string TestName() const {
     return ::testing::UnitTest::GetInstance()->current_test_info()->name();
@@ -92,7 +84,7 @@ class ComputeConstantTest : public ::testing::Test {
                                          ComputationBuilder* builder) {
     TF_ASSIGN_OR_RETURN(auto literal,
                         ComputeConstantLiteral(client, operand, builder));
-    return LiteralUtil::Get<Scalar>(*literal, {});
+    return literal->Get<Scalar>({});
   }
 
   bool IsConstant(const ComputationDataHandle& operand,
@@ -217,7 +209,7 @@ TEST_F(ComputeConstantTest, NonScalarAdd) {
     auto computed = ComputeConstantLiteral(client, computation, &b);
     ASSERT_TRUE(computed.ok()) << computed.status();
     std::unique_ptr<Literal> expected_literal =
-        LiteralUtil::CreateR1<int32>({4, 6});
+        Literal::CreateR1<int32>({4, 6});
     LiteralTestUtil::ExpectEqual(*expected_literal, *computed.ValueOrDie());
   }
 }
@@ -231,7 +223,7 @@ TEST_F(ComputeConstantTest, IntegerDivide) {
 
     auto computed = ComputeConstantLiteral(client, computation, &b);
     ASSERT_TRUE(computed.ok()) << computed.status();
-    std::unique_ptr<Literal> expected_literal = LiteralUtil::CreateR0<int32>(5);
+    std::unique_ptr<Literal> expected_literal = Literal::CreateR0<int32>(5);
     LiteralTestUtil::ExpectEqual(*expected_literal, *computed.ValueOrDie());
   }
 }
@@ -293,20 +285,3 @@ TEST_F(ComputeConstantTest, DISABLED_ON_CPU(ReuseComputedConstant)) {
 
 }  // namespace
 }  // namespace xla
-
-int main(int argc, char** argv) {
-  std::vector<tensorflow::Flag> flag_list;
-  xla::legacy_flags::AppendCpuCompilerFlags(&flag_list);
-  xla::string usage = tensorflow::Flags::Usage(argv[0], flag_list);
-  const bool parse_result = tensorflow::Flags::Parse(&argc, argv, flag_list);
-  if (!parse_result) {
-    LOG(ERROR) << "\n" << usage;
-    return 2;
-  }
-  testing::InitGoogleTest(&argc, argv);
-  if (argc > 1) {
-    LOG(ERROR) << "Unknown argument " << argv[1] << "\n" << usage;
-    return 2;
-  }
-  return RUN_ALL_TESTS();
-}

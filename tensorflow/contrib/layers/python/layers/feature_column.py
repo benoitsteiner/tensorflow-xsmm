@@ -15,13 +15,13 @@
 """This API defines FeatureColumn abstraction.
 
 FeatureColumns provide a high level abstraction for ingesting and representing
-features in tf.learn Estimator models.
+features in `Estimator` models.
 
 FeatureColumns are the primary way of encoding features for pre-canned
-tf.learn Estimators.
+`Estimator` models.
 
-When using FeatureColumns with tf.learn models, the type of feature column you
-should choose depends on (1) the feature type and (2) the model type.
+When using FeatureColumns with `Estimator` models, the type of feature column
+you should choose depends on (1) the feature type and (2) the model type.
 
 (1) Feature type:
 
@@ -74,7 +74,7 @@ should choose depends on (1) the feature type and (2) the model type.
       columns=[department_column, bucketized_age_column],
       hash_bucket_size=1000)
 
-Example of building tf.learn model using FeatureColumns:
+Example of building an `Estimator` model using FeatureColumns:
 
   # Define features and transformations
   deep_feature_columns = [age_column, embedded_dept_column]
@@ -104,7 +104,7 @@ FeatureColumns can also be transformed into a generic input layer for
 custom models using `input_from_feature_columns` within
 `feature_column_ops.py`.
 
-Example of building non-tf.learn model using FeatureColumns:
+Example of building a non-`Estimator` model using FeatureColumns:
 
   # Building model via layers
 
@@ -165,7 +165,7 @@ class _LinearEmbeddingLookupArguments(
                             "combiner"])):
   """Represents the information needed from a column for embedding lookup.
 
-  Used to to compute DNN inputs and weighted sum.
+  Used to compute DNN inputs and weighted sum.
   """
   pass
 
@@ -184,7 +184,7 @@ class _DeepEmbeddingLookupArguments(
                             "trainable"])):
   """Represents the information needed from a column for embedding lookup.
 
-  Used to to compute DNN inputs and weighted sum.
+  Used to compute DNN inputs and weighted sum.
   """
   pass
 
@@ -476,7 +476,7 @@ class _SparseColumn(
     return self._do_transform(input_tensor)
 
   @property
-  def _parse_example_config(self):
+  def _parse_example_spec(self):
     return self.config
 
   @property
@@ -802,7 +802,7 @@ class _WeightedSparseColumn(
         inputs.get(self.sparse_id_column), inputs.get(self.weight_column_name))
 
   @property
-  def _parse_example_config(self):
+  def _parse_example_spec(self):
     return self.config
 
   @property
@@ -960,7 +960,7 @@ class _OneHotColumn(
     return self._to_dnn_input_layer(inputs.get(self.sparse_id_column))
 
   @property
-  def _parse_example_config(self):
+  def _parse_example_spec(self):
     return self.config
 
 
@@ -1110,7 +1110,7 @@ class _EmbeddingColumn(
     return inputs.get(self.sparse_id_column)
 
   @property
-  def _parse_example_config(self):
+  def _parse_example_spec(self):
     return self.config
 
 
@@ -1184,7 +1184,7 @@ def _embeddings_from_arguments(column,
           raise ValueError(
               "The embedding variable with name {} already "
               "exists, but its shape does not match required "
-              "embedding shape  here. Please make sure to use "
+              "embedding shape here. Please make sure to use "
               "different shared_embedding_name for different "
               "shared embeddings.".format(args.shared_embedding_name))
     else:
@@ -1352,8 +1352,8 @@ def shared_embedding_columns(sparse_id_columns,
                      "element.")
   for sparse_id_column in sparse_id_columns:
     if not isinstance(sparse_id_column, _SparseColumn):
-      raise TypeError("Elements of sparse_id_columns must be _SparseColumn, but"
-                      "{} is not.".format(sparse_id_column))
+      raise TypeError("Elements of sparse_id_columns must be _SparseColumn, "
+                      "but {} is not.".format(sparse_id_column))
 
   if len(sparse_id_columns) == 1:
     return [
@@ -1467,7 +1467,7 @@ class _ScatteredEmbeddingColumn(
     return inputs.get(self.column_name)
 
   @property
-  def _parse_example_config(self):
+  def _parse_example_spec(self):
     return self.config
 
 
@@ -1817,7 +1817,7 @@ class _RealValuedColumn(
         self._normalized_input_tensor(inputs.get(self.name)))
 
   @property
-  def _parse_example_config(self):
+  def _parse_example_spec(self):
     return self.config
 
 
@@ -2081,7 +2081,7 @@ class _BucketizedColumn(
         _LazyBuilderByColumnsToTensor(columns_to_tensors))
 
   @property
-  def _parse_example_config(self):
+  def _parse_example_spec(self):
     return self.config
 
   @property
@@ -2311,7 +2311,7 @@ class _CrossedColumn(
         _LazyBuilderByColumnsToTensor(columns_to_tensors))
 
   @property
-  def _parse_example_config(self):
+  def _parse_example_spec(self):
     return self.config
 
   @property

@@ -23,11 +23,10 @@ import math
 
 from tensorflow.contrib.compiler import jit
 from tensorflow.contrib.layers.python.layers import layers
-from tensorflow.contrib.rnn.python.ops import core_rnn_cell
-from tensorflow.contrib.rnn.python.ops import core_rnn_cell_impl
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import op_def_registry
 from tensorflow.python.framework import ops
+from tensorflow.python.framework import tensor_shape
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import clip_ops
 from tensorflow.python.ops import init_ops
@@ -76,12 +75,12 @@ def _get_sharded_variable(name, shape, dtype, num_shards):
   return shards
 
 
-class CoupledInputForgetGateLSTMCell(core_rnn_cell.RNNCell):
+class CoupledInputForgetGateLSTMCell(rnn_cell_impl.RNNCell):
   """Long short-term memory unit (LSTM) recurrent network cell.
 
   The default non-peephole implementation is based on:
 
-    http://deeplearning.cs.cmu.edu/pdfs/Hochreiter97_lstm.pdf
+    http://www.bioinf.jku.at/publications/older/2604.pdf
 
   S. Hochreiter and J. Schmidhuber.
   "Long Short-Term Memory". Neural Computation, 9(8):1735-1780, 1997.
@@ -154,14 +153,12 @@ class CoupledInputForgetGateLSTMCell(core_rnn_cell.RNNCell):
     self._reuse = reuse
 
     if num_proj:
-      self._state_size = (
-          core_rnn_cell.LSTMStateTuple(num_units, num_proj)
-          if state_is_tuple else num_units + num_proj)
+      self._state_size = (rnn_cell_impl.LSTMStateTuple(num_units, num_proj)
+                          if state_is_tuple else num_units + num_proj)
       self._output_size = num_proj
     else:
-      self._state_size = (
-          core_rnn_cell.LSTMStateTuple(num_units, num_units)
-          if state_is_tuple else 2 * num_units)
+      self._state_size = (rnn_cell_impl.LSTMStateTuple(num_units, num_units)
+                          if state_is_tuple else 2 * num_units)
       self._output_size = num_units
 
   @property
@@ -254,12 +251,12 @@ class CoupledInputForgetGateLSTMCell(core_rnn_cell.RNNCell):
         m = clip_ops.clip_by_value(m, -self._proj_clip, self._proj_clip)
         # pylint: enable=invalid-unary-operand-type
 
-    new_state = (core_rnn_cell.LSTMStateTuple(c, m) if self._state_is_tuple else
-                 array_ops.concat([c, m], 1))
+    new_state = (rnn_cell_impl.LSTMStateTuple(c, m)
+                 if self._state_is_tuple else array_ops.concat([c, m], 1))
     return m, new_state
 
 
-class TimeFreqLSTMCell(core_rnn_cell.RNNCell):
+class TimeFreqLSTMCell(rnn_cell_impl.RNNCell):
   """Time-Frequency Long short-term memory unit (LSTM) recurrent network cell.
 
   This implementation is based on:
@@ -427,7 +424,7 @@ class TimeFreqLSTMCell(core_rnn_cell.RNNCell):
     return freq_inputs
 
 
-class GridLSTMCell(core_rnn_cell.RNNCell):
+class GridLSTMCell(rnn_cell_impl.RNNCell):
   """Grid Long short-term memory unit (LSTM) recurrent network cell.
 
   The default is based on:
@@ -466,7 +463,7 @@ class GridLSTMCell(core_rnn_cell.RNNCell):
         state is clipped by this value prior to the cell output activation.
       initializer: (optional) The initializer to use for the weight and
         projection matrices, default None.
-      num_unit_shards: (optional) int, defualt 1, How to split the weight
+      num_unit_shards: (optional) int, default 1, How to split the weight
         matrix. If > 1,the weight matrix is stored across num_unit_shards.
       forget_bias: (optional) float, default 1.0, The initial bias of the
         forget gates, used to reduce the scale of forgetting at the beginning
@@ -922,7 +919,7 @@ class BidirectionalGridLSTMCell(GridLSTMCell):
         state is clipped by this value prior to the cell output activation.
       initializer: (optional) The initializer to use for the weight and
         projection matrices, default None.
-      num_unit_shards: (optional) int, defualt 1, How to split the weight
+      num_unit_shards: (optional) int, default 1, How to split the weight
         matrix. If > 1,the weight matrix is stored across num_unit_shards.
       forget_bias: (optional) float, default 1.0, The initial bias of the
         forget gates, used to reduce the scale of forgetting at the beginning
@@ -1020,11 +1017,11 @@ class BidirectionalGridLSTMCell(GridLSTMCell):
 
 
 # pylint: disable=protected-access
-_linear = core_rnn_cell_impl._linear
+_linear = rnn_cell_impl._linear
 # pylint: enable=protected-access
 
 
-class AttentionCellWrapper(core_rnn_cell.RNNCell):
+class AttentionCellWrapper(rnn_cell_impl.RNNCell):
   """Basic attention cell wrapper.
 
   Implementation based on https://arxiv.org/abs/1409.0473.
@@ -1114,14 +1111,14 @@ class AttentionCellWrapper(core_rnn_cell.RNNCell):
     if input_size is None:
       input_size = inputs.get_shape().as_list()[1]
     inputs = _linear([inputs, attns], input_size, True)
-    lstm_output, new_state = self._cell(inputs, state)
+    cell_output, new_state = self._cell(inputs, state)
     if self._state_is_tuple:
       new_state_cat = array_ops.concat(nest.flatten(new_state), 1)
     else:
       new_state_cat = new_state
     new_attns, new_attn_states = self._attention(new_state_cat, attn_states)
     with vs.variable_scope("attn_output_projection"):
-      output = _linear([lstm_output, new_attns], self._attn_size, True)
+      output = _linear([cell_output, new_attns], self._attn_size, True)
     new_attn_states = array_ops.concat(
         [new_attn_states, array_ops.expand_dims(output, 1)], 1)
     new_attn_states = array_ops.reshape(
@@ -1155,7 +1152,7 @@ class AttentionCellWrapper(core_rnn_cell.RNNCell):
       return new_attns, new_attn_states
 
 
-class HighwayWrapper(core_rnn_cell.RNNCell):
+class HighwayWrapper(rnn_cell_impl.RNNCell):
   """RNNCell wrapper that adds highway connection on cell input and output.
 
   Based on:
@@ -1238,7 +1235,7 @@ class HighwayWrapper(core_rnn_cell.RNNCell):
     return (res_outputs, new_state)
 
 
-class LayerNormBasicLSTMCell(core_rnn_cell.RNNCell):
+class LayerNormBasicLSTMCell(rnn_cell_impl.RNNCell):
   """LSTM unit with layer normalization and recurrent dropout.
 
   This class adds layer normalization and recurrent dropout to a
@@ -1300,7 +1297,7 @@ class LayerNormBasicLSTMCell(core_rnn_cell.RNNCell):
 
   @property
   def state_size(self):
-    return core_rnn_cell.LSTMStateTuple(self._num_units, self._num_units)
+    return rnn_cell_impl.LSTMStateTuple(self._num_units, self._num_units)
 
   @property
   def output_size(self):
@@ -1350,11 +1347,11 @@ class LayerNormBasicLSTMCell(core_rnn_cell.RNNCell):
       new_c = self._norm(new_c, "state")
     new_h = self._activation(new_c) * math_ops.sigmoid(o)
 
-    new_state = core_rnn_cell.LSTMStateTuple(new_c, new_h)
+    new_state = rnn_cell_impl.LSTMStateTuple(new_c, new_h)
     return new_h, new_state
 
 
-class NASCell(core_rnn_cell.RNNCell):
+class NASCell(rnn_cell_impl.RNNCell):
   """Neural Architecture Search (NAS) recurrent network cell.
 
   This implements the recurrent cell from the paper:
@@ -1388,10 +1385,10 @@ class NASCell(core_rnn_cell.RNNCell):
     self._reuse = reuse
 
     if num_proj is not None:
-      self._state_size = core_rnn_cell.LSTMStateTuple(num_units, num_proj)
+      self._state_size = rnn_cell_impl.LSTMStateTuple(num_units, num_proj)
       self._output_size = num_proj
     else:
-      self._state_size = core_rnn_cell.LSTMStateTuple(num_units, num_units)
+      self._state_size = rnn_cell_impl.LSTMStateTuple(num_units, num_units)
       self._output_size = num_units
 
   @property
@@ -1498,11 +1495,11 @@ class NASCell(core_rnn_cell.RNNCell):
           dtype)
       new_m = math_ops.matmul(new_m, concat_w_proj)
 
-    new_state = core_rnn_cell.LSTMStateTuple(new_c, new_m)
+    new_state = rnn_cell_impl.LSTMStateTuple(new_c, new_m)
     return new_m, new_state
 
 
-class UGRNNCell(core_rnn_cell.RNNCell):
+class UGRNNCell(rnn_cell_impl.RNNCell):
   """Update Gate Recurrent Neural Network (UGRNN) cell.
 
   Compromise between a LSTM/GRU and a vanilla RNN.  There is only one
@@ -1589,7 +1586,7 @@ class UGRNNCell(core_rnn_cell.RNNCell):
     return new_output, new_state
 
 
-class IntersectionRNNCell(core_rnn_cell.RNNCell):
+class IntersectionRNNCell(rnn_cell_impl.RNNCell):
   """Intersection Recurrent Neural Network (+RNN) cell.
 
   Architecture with coupled recurrent gate as well as coupled depth
@@ -1712,7 +1709,7 @@ class IntersectionRNNCell(core_rnn_cell.RNNCell):
 _REGISTERED_OPS = None
 
 
-class CompiledWrapper(core_rnn_cell.RNNCell):
+class CompiledWrapper(rnn_cell_impl.RNNCell):
   """Wraps step execution in an XLA JIT scope."""
 
   def __init__(self, cell, compile_stateful=False):
@@ -1783,7 +1780,7 @@ def _random_exp_initializer(minval,
   return _initializer
 
 
-class PhasedLSTMCell(core_rnn_cell.RNNCell):
+class PhasedLSTMCell(rnn_cell_impl.RNNCell):
   """Phased LSTM recurrent network cell.
 
   https://arxiv.org/pdf/1610.09513v1.pdf
@@ -1809,12 +1806,12 @@ class PhasedLSTMCell(core_rnn_cell.RNNCell):
           period during which the gates are open.
       trainable_ratio_on: bool, weather ratio_on is trainable.
       period_init_min: float or scalar float Tensor. With value > 0.
-          Minimum value of the initalized period.
+          Minimum value of the initialized period.
           The period values are initialized by drawing from the distribution:
           e^U(log(period_init_min), log(period_init_max))
           Where U(.,.) is the uniform distribution.
       period_init_max: float or scalar float Tensor.
-          With value > period_init_min. Maximum value of the initalized period.
+          With value > period_init_min. Maximum value of the initialized period.
       reuse: (optional) Python boolean describing whether to reuse variables
         in an existing scope. If not `True`, and the existing scope already has
         the given variables, an error is raised.
@@ -1831,7 +1828,7 @@ class PhasedLSTMCell(core_rnn_cell.RNNCell):
 
   @property
   def state_size(self):
-    return core_rnn_cell.LSTMStateTuple(self._num_units, self._num_units)
+    return rnn_cell_impl.LSTMStateTuple(self._num_units, self._num_units)
 
   @property
   def output_size(self):
@@ -1858,13 +1855,13 @@ class PhasedLSTMCell(core_rnn_cell.RNNCell):
          It stores the time.
          The second Tensor has shape [batch, features_size], and type float32.
          It stores the features.
-      state: core_rnn_cell.LSTMStateTuple, state from previous timestep.
+      state: rnn_cell_impl.LSTMStateTuple, state from previous timestep.
 
     Returns:
       A tuple containing:
       - A Tensor of float32, and shape [batch_size, num_units], representing the
         output of the cell.
-      - A core_rnn_cell.LSTMStateTuple, containing 2 Tensors of float32, shape
+      - A rnn_cell_impl.LSTMStateTuple, containing 2 Tensors of float32, shape
         [batch_size, num_units], representing the new state and the output.
     """
     (c_prev, h_prev) = state
@@ -1921,12 +1918,187 @@ class PhasedLSTMCell(core_rnn_cell.RNNCell):
     new_c = k * new_c + (1 - k) * c_prev
     new_h = k * new_h + (1 - k) * h_prev
 
-    new_state = core_rnn_cell.LSTMStateTuple(new_c, new_h)
+    new_state = rnn_cell_impl.LSTMStateTuple(new_c, new_h)
 
     return new_h, new_state
 
+class ConvLSTMCell(rnn_cell_impl.RNNCell):
+  """Convolutional LSTM recurrent network cell.
 
-class GLSTMCell(core_rnn_cell.RNNCell):
+  https://arxiv.org/pdf/1506.04214v1.pdf
+  """
+
+  def __init__(self,
+               conv_ndims,
+               input_shape,
+               output_channels,
+               kernel_shape,
+               use_bias=True,
+               skip_connection=False,
+               forget_bias=1.0,
+               initializers=None,
+               name="conv_lstm_cell"):
+    """Construct ConvLSTMCell.
+    Args:
+      conv_ndims: Convolution dimensionality (1, 2 or 3).
+      input_shape: Shape of the input as int tuple, excluding the batch size.
+      output_channels: int, number of output channels of the conv LSTM.
+      kernel_shape: Shape of kernel as in tuple (of size 1,2 or 3).
+      use_bias: Use bias in convolutions.
+      skip_connection: If set to `True`, concatenate the input to the
+      output of the conv LSTM. Default: `False`.
+      forget_bias: Forget bias.
+      name: Name of the module.
+    Raises:
+      ValueError: If `skip_connection` is `True` and stride is different from 1
+        or if `input_shape` is incompatible with `conv_ndims`.
+    """
+    super(ConvLSTMCell, self).__init__(name=name)
+
+    if conv_ndims != len(input_shape)-1:
+      raise ValueError("Invalid input_shape {} for conv_ndims={}.".format(
+          input_shape, conv_ndims))
+
+    self._conv_ndims = conv_ndims
+    self._input_shape = input_shape
+    self._output_channels = output_channels
+    self._kernel_shape = kernel_shape
+    self._use_bias = use_bias
+    self._forget_bias = forget_bias
+    self._skip_connection = skip_connection
+
+    self._total_output_channels = output_channels
+    if self._skip_connection:
+      self._total_output_channels += self._input_shape[-1]
+
+    state_size = tensor_shape.TensorShape(self._input_shape[:-1] 
+                                          + [self._output_channels])
+    self._state_size = rnn_cell_impl.LSTMStateTuple(state_size, state_size)
+    self._output_size = tensor_shape.TensorShape(self._input_shape[:-1]
+                                                 + [self._total_output_channels])
+
+  @property
+  def output_size(self):
+    return self._output_size
+
+  @property
+  def state_size(self):
+    return self._state_size
+
+  def call(self, inputs, state, scope=None):
+    cell, hidden = state
+    new_hidden = _conv([inputs, hidden],
+                       self._kernel_shape,
+                       4*self._output_channels,
+                       self._use_bias)
+    gates = array_ops.split(value=new_hidden,
+                            num_or_size_splits=4,
+                            axis=self._conv_ndims+1)
+
+    input_gate, new_input, forget_gate, output_gate = gates
+    new_cell = math_ops.sigmoid(forget_gate + self._forget_bias) * cell
+    new_cell += math_ops.sigmoid(input_gate) * math_ops.tanh(new_input)
+    output = math_ops.tanh(new_cell) * math_ops.sigmoid(output_gate)
+
+    if self._skip_connection:
+      output = array_ops.concat([output, inputs], axis=-1)
+    new_state = rnn_cell_impl.LSTMStateTuple(new_cell, output)
+    return output, new_state
+
+class Conv1DLSTMCell(ConvLSTMCell):
+  """1D Convolutional LSTM recurrent network cell.
+
+  https://arxiv.org/pdf/1506.04214v1.pdf
+  """
+  def __init__(self, name="conv_1d_lstm_cell", **kwargs):
+    """Construct Conv1DLSTM. See `ConvLSTMCell` for more details."""
+    super(Conv1DLSTMCell, self).__init__(conv_ndims=1, **kwargs)
+
+class Conv2DLSTMCell(ConvLSTMCell):
+  """2D Convolutional LSTM recurrent network cell.
+
+  https://arxiv.org/pdf/1506.04214v1.pdf
+  """
+  def __init__(self, name="conv_2d_lstm_cell", **kwargs):
+    """Construct Conv2DLSTM. See `ConvLSTMCell` for more details."""
+    super(Conv2DLSTMCell, self).__init__(conv_ndims=2, **kwargs)
+
+class Conv3DLSTMCell(ConvLSTMCell):
+  """3D Convolutional LSTM recurrent network cell.
+
+  https://arxiv.org/pdf/1506.04214v1.pdf
+  """
+  def __init__(self, name="conv_3d_lstm_cell", **kwargs):
+    """Construct Conv3DLSTM. See `ConvLSTMCell` for more details."""
+    super(Conv3DLSTMCell, self).__init__(conv_ndims=3, **kwargs)
+
+def _conv(args, 
+          filter_size,
+          num_features,
+          bias,
+          bias_start=0.0):
+  """convolution:
+  Args:
+    args: a Tensor or a list of Tensors of dimension 3D, 4D or 5D, 
+    batch x n, Tensors.
+    filter_size: int tuple of filter height and width.
+    num_features: int, number of features.
+    bias_start: starting value to initialize the bias; 0 by default.
+  Returns:
+    A 3D, 4D, or 5D Tensor with shape [batch ... num_features]
+  Raises:
+    ValueError: if some of the arguments has unspecified or wrong shape.
+  """
+
+  # Calculate the total size of arguments on dimension 1.
+  total_arg_size_depth = 0
+  shapes = [a.get_shape().as_list() for a in args]
+  shape_length = len(shapes[0])
+  for shape in shapes:
+    if len(shape) not in [3,4,5]:
+      raise ValueError("Conv Linear expects 3D, 4D or 5D arguments: %s" % str(shapes))
+    if len(shape) != len(shapes[0]):
+      raise ValueError("Conv Linear expects all args to be of same Dimensiton: %s" % str(shapes))
+    else:
+      total_arg_size_depth += shape[-1]
+  dtype = [a.dtype for a in args][0]
+
+  # determine correct conv operation
+  if   shape_length == 3:
+    conv_op = nn_ops.conv1d
+    strides = 1
+  elif shape_length == 4:
+    conv_op = nn_ops.conv2d
+    strides = shape_length*[1]
+  elif shape_length == 5:
+    conv_op = nn_ops.conv3d
+    strides = shape_length*[1]
+
+  # Now the computation.
+  kernel = vs.get_variable(
+      "kernel", 
+      filter_size + [total_arg_size_depth, num_features],
+      dtype=dtype)
+  if len(args) == 1:
+    res = conv_op(args[0],
+                  kernel,
+                  strides,
+                  padding='SAME')
+  else:
+    res = conv_op(array_ops.concat(axis=shape_length-1, values=args),
+                  kernel,
+                  strides,
+                  padding='SAME')
+  if not bias:
+    return res
+  bias_term = vs.get_variable(
+      "biases", [num_features],
+      dtype=dtype,
+      initializer=init_ops.constant_initializer(
+          bias_start, dtype=dtype))
+  return res + bias_term
+
+class GLSTMCell(rnn_cell_impl.RNNCell):
   """Group LSTM cell (G-LSTM).
 
   The implementation is based on:
@@ -1982,10 +2154,10 @@ class GLSTMCell(core_rnn_cell.RNNCell):
                            int(self._num_units / self._number_of_groups)]
 
     if num_proj:
-      self._state_size = core_rnn_cell.LSTMStateTuple(num_units, num_proj)
+      self._state_size = rnn_cell_impl.LSTMStateTuple(num_units, num_proj)
       self._output_size = num_proj
     else:
-      self._state_size = core_rnn_cell.LSTMStateTuple(num_units, num_units)
+      self._state_size = rnn_cell_impl.LSTMStateTuple(num_units, num_units)
       self._output_size = num_units
 
   @property
@@ -2030,7 +2202,7 @@ class GLSTMCell(core_rnn_cell.RNNCell):
         Here output_dim is:
            num_proj if num_proj was set,
            num_units otherwise.
-      - LSTMStateTuple representing the new state of G-LSTM  cell
+      - LSTMStateTuple representing the new state of G-LSTM cell
         after reading `inputs` when the previous state was `state`.
 
     Raises:
@@ -2097,5 +2269,5 @@ class GLSTMCell(core_rnn_cell.RNNCell):
       with vs.variable_scope("projection"):
         m = _linear(m, self._num_proj, bias=False)
 
-    new_state = core_rnn_cell.LSTMStateTuple(c, m)
+    new_state = rnn_cell_impl.LSTMStateTuple(c, m)
     return m, new_state

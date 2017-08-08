@@ -139,7 +139,7 @@ bool FindType(const Graph* graph, const Node* node, bool* signed_input,
 Status FindSaveOp(const Graph* graph, Node** save_op,
                   std::vector<const Edge*>* in_edges, bool* found) {
   *found = false;
-  for (Node* node : graph->nodes()) {
+  for (Node* node : graph->op_nodes()) {
     if (node->type_string() == "SaveV2") {
       // We found multiple save ops.
       if (*found) {
@@ -154,7 +154,7 @@ Status FindSaveOp(const Graph* graph, Node** save_op,
 }
 
 Node* FindRestoreAllOp(const Graph* graph, StringPiece save_prefix) {
-  for (Node* node : graph->nodes()) {
+  for (Node* node : graph->op_nodes()) {
     // The restore_all op should have the same prefix of the save_op.
     if (node->name() == strings::StrCat(save_prefix, "/restore_all")) {
       return node;
@@ -653,28 +653,38 @@ Status DoQuantizeTraining(int32 num_bits, const string& quant_op_type,
   return Status::OK();
 }
 
-Status DoQuantizeTrainingOnSerializedGraphDef(const string& input_graph,
-                                              int32 num_bits,
-                                              const string& quant_op_type,
-                                              string* result_graph) {
-  // First create the graph from the GraphDef.
+Status DoQuantizeTrainingOnGraphDef(const GraphDef& input_graphdef,
+                                    int32 num_bits, const string& quant_op_type,
+                                    GraphDef* result_graphdef) {
   Graph graph(OpRegistry::Global());
   GraphConstructorOptions opts;
-  GraphDef input_graphdef;
-  if (!ParseProtoUnlimited(&input_graphdef, input_graph)) {
-    return errors::InvalidArgument("Invalid input graph");
-  }
   TF_RETURN_IF_ERROR(ConvertGraphDefToGraph(opts, input_graphdef, &graph));
 
   // Call the rewriter on the graph.
   TF_RETURN_IF_ERROR(DoQuantizeTraining(num_bits, quant_op_type, &graph));
 
   // Convert the result graph back to a GraphDef.
-  GraphDef output_graphdef;
-  graph.ToGraphDef(&output_graphdef);
+  graph.ToGraphDef(result_graphdef);
+  return Status::OK();
+}
 
-  if (!output_graphdef.SerializeToString(result_graph)) {
-    return errors::InvalidArgument("Invalid output graph");
+Status DoQuantizeTrainingOnSerializedGraphDef(const string& input_graph_string,
+                                              int32 num_bits,
+                                              const string& quant_op_type,
+                                              string* result_graph_string) {
+  // First create the graph from the GraphDef.
+  GraphDef input_graphdef;
+  if (!ParseProtoUnlimited(&input_graphdef, input_graph_string)) {
+    return errors::InvalidArgument(
+        "input_graph_string is not a serialized GraphDef protocol buffer");
+  }
+  GraphDef output_graphdef;
+  TF_RETURN_IF_ERROR(DoQuantizeTrainingOnGraphDef(
+      input_graphdef, num_bits, quant_op_type, &output_graphdef));
+
+  if (!output_graphdef.SerializeToString(result_graph_string)) {
+    return errors::Internal(
+        "quantize training transformation resulted in invalid GraphDef");
   }
   return Status::OK();
 }

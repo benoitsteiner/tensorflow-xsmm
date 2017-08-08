@@ -776,7 +776,8 @@ class Conv2DSlowBackpropFilterOp : public OpKernel {
     if (cudnn_use_autotune_ && !AutoTuneConvBwdFilter::GetInstance()->Find(
                                    conv_parameters, &algorithm_config)) {
       std::vector<AlgorithmType> algorithms;
-      CHECK(stream->parent()->GetConvolveBackwardFilterAlgorithms(&algorithms));
+      CHECK(stream->parent()->GetConvolveBackwardFilterAlgorithms(
+          conv_parameters.ShouldIncludeWinogradNonfusedAlgo<T>(), &algorithms));
       ProfileResult best_result;
       ProfileResult best_result_no_scratch;
       for (auto profile_algorithm : algorithms) {
@@ -808,16 +809,15 @@ class Conv2DSlowBackpropFilterOp : public OpKernel {
         }
       }
       OP_REQUIRES(context,
-                  best_result.is_valid() &&
-                      best_result.algorithm() != kDefaultAlgorithm,
+                  best_result.is_valid() || best_result_no_scratch.is_valid(),
                   errors::NotFound("No algorithm worked!"));
-      OP_REQUIRES(context,
-                  best_result_no_scratch.is_valid() &&
-                      best_result_no_scratch.algorithm() != kDefaultAlgorithm,
-                  errors::NotFound("No algorithm without scratch worked!"));
-      algorithm_config.set_algorithm(best_result.algorithm());
-      algorithm_config.set_algorithm_no_scratch(
-          best_result_no_scratch.algorithm());
+      if (best_result.is_valid()) {
+        algorithm_config.set_algorithm(best_result.algorithm());
+      }
+      if (best_result_no_scratch.is_valid()) {
+        algorithm_config.set_algorithm_no_scratch(
+            best_result_no_scratch.algorithm());
+      }
       AutoTuneConvBwdFilter::GetInstance()->Insert(conv_parameters,
                                                    algorithm_config);
     }
