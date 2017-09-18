@@ -37,7 +37,6 @@ limitations under the License.
 #include "tensorflow/core/lib/core/stringpiece.h"
 #include "tensorflow/core/lib/gtl/array_slice.h"
 #include "tensorflow/core/platform/macros.h"
-#include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/stacktrace.h"
 #include "tensorflow/core/platform/types.h"
 
@@ -57,10 +56,10 @@ class ComputationBuilder {
   ~ComputationBuilder();
 
   // Returns the client the builder was initialized with.
-  Client* client() { return client_; }
+  Client* client() const { return client_; }
 
   // Returns the computation name.
-  const string& name() { return name_; }
+  const string& name() const { return name_; }
 
   // Sets OpMetadata that will be added to all instructions until cleared.
   //
@@ -69,13 +68,11 @@ class ComputationBuilder {
   // instructions generated via this Computation Builder will have the same
   // OpMetadata attached until a call to ClearOpMetdata.
   void SetOpMetadata(const OpMetadata& metadata) {
-    tensorflow::mutex_lock lock(mutex_);
     metadata_ = metadata;
   }
 
   // Clears the HloMetdata state.
   void ClearOpMetadata() {
-    tensorflow::mutex_lock lock(mutex_);
     metadata_.Clear();
   }
 
@@ -679,12 +676,12 @@ class ComputationBuilder {
   // Computes the value of a constant indicated by a
   // ComputationDataHandle.
   //
-  // The handle must be from the computation currently being built -
+  // The operand must be from the computation currently being built -
   // i.e., returned from this builder with no intervening call to
   // Build(). This happens to currently work regardless of that, but
   // that may stop working at any time.
   //
-  // The handle must represent a constant value, which in this case
+  // The operand must represent a constant value, which in this case
   // means that it must not statically depend on a parameter to the
   // computation that is being built.
   //
@@ -702,8 +699,8 @@ class ComputationBuilder {
   //
   // If output_layout is non-null, then the output of the computation
   // will be stored using that layout.
-  StatusOr<std::unique_ptr<GlobalData>> ComputeConstant(
-      const ComputationDataHandle& handle,
+  StatusOr<std::unique_ptr<Literal>> ComputeConstant(
+      const ComputationDataHandle& operand,
       const Layout* output_layout = nullptr);
 
   // Returns a new ComputationBuilder whose resultant Computation is used only
@@ -826,15 +823,12 @@ class ComputationBuilder {
   Client* client_;
 
   // Mode bit that indicates whether to die when a first error is encountered.
-  bool die_immediately_on_error_{false};
-
-  // Mutex to guard against concurrent access to metadata_.
-  mutable tensorflow::mutex mutex_;
+  bool die_immediately_on_error_ = false;
 
   // The metadata to attach to each op. This is structured as a "modal"-like
   // operation, in order to simplify client code (and not sprinkle this metadata
   // throughout the TensorFlow op kernel implementations).
-  OpMetadata metadata_ GUARDED_BY(mutex_);
+  OpMetadata metadata_;
 
   TF_DISALLOW_COPY_AND_ASSIGN(ComputationBuilder);
 };
