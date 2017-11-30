@@ -26,6 +26,7 @@ limitations under the License.
 #include "tensorflow/core/lib/strings/strcat.h"
 #include "tensorflow/core/lib/strings/stringprintf.h"
 #include "tensorflow/core/platform/env.h"
+#include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/stacktrace.h"
 
 namespace xla {
@@ -41,15 +42,15 @@ Status WithLogBacktrace(const Status& status) {
 
 }  // namespace
 
-ScopedLoggingTimer::ScopedLoggingTimer(const string& label, int32 vlog_level)
-    : label(label), vlog_level(vlog_level) {
-  if (VLOG_IS_ON(vlog_level)) {
+ScopedLoggingTimer::ScopedLoggingTimer(const string& label, bool enabled)
+    : enabled(enabled), label(label) {
+  if (enabled) {
     start_micros = tensorflow::Env::Default()->NowMicros();
   }
 }
 
 ScopedLoggingTimer::~ScopedLoggingTimer() {
-  if (VLOG_IS_ON(vlog_level)) {
+  if (enabled) {
     uint64 end_micros = tensorflow::Env::Default()->NowMicros();
     double secs = (end_micros - start_micros) / 1000000.0;
 
@@ -266,6 +267,11 @@ void LogLines(int sev, tensorflow::StringPiece text, const char* fname,
     sev = tensorflow::ERROR;
   }
 
+  // Protect calls with a mutex so we don't interleave calls to LogLines from
+  // multiple threads.
+  static tensorflow::mutex log_lines_mu(tensorflow::LINKER_INITIALIZED);
+  tensorflow::mutex_lock lock(log_lines_mu);
+
   size_t cur = 0;
   while (cur < text.size()) {
     size_t eol = text.find('\n', cur);
@@ -328,6 +334,15 @@ std::vector<std::pair<int64, int64>> CommonFactors(
     }
   }
   return bounds;
+}
+
+string SanitizeFileName(string file_name) {
+  for (char& c : file_name) {
+    if (c == '/' || c == '\\' || c == '[' || c == ']') {
+      c = '_';
+    }
+  }
+  return file_name;
 }
 
 }  // namespace xla

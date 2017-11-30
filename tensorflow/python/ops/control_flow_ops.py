@@ -60,6 +60,7 @@ from tensorflow.core.protobuf import control_flow_pb2
 from tensorflow.python.eager import context
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
+from tensorflow.python.framework import errors
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import sparse_tensor
 from tensorflow.python.framework import tensor_shape
@@ -86,6 +87,29 @@ from tensorflow.python.util import tf_should_use
 _basetuple = tuple
 
 
+def _summarize_eager(tensor, summarize=None):
+  """Returns a summarized string representation of eager `tensor`.
+
+  Args:
+    tensor: EagerTensor to summarize
+    summarize: Include these many first elements of `array`
+  """
+  # reshape((-1,)) is the fastest way to get a flat array view
+  if tensor._rank():  # pylint: disable=protected-access
+    flat = tensor.numpy().reshape((-1,))
+    lst = [str(x) for x in flat[:summarize]]
+    if len(lst) < flat.size:
+      lst.append("...")
+  else:
+    # tensor.numpy() returns a scalar for zero dimensional arrays
+    if summarize != 0:
+      lst = [str(tensor.numpy())]
+    else:
+      lst = []
+
+  return ", ".join(lst)
+
+
 # pylint: disable=protected-access
 
 
@@ -98,7 +122,8 @@ def Assert(condition, data, summarize=None, name=None):
   If `condition` evaluates to false, print the list of tensors in `data`.
   `summarize` determines how many entries of the tensors to print.
 
-  NOTE: To ensure that Assert executes, one usually attaches a dependency:
+  NOTE: In graph mode, to ensure that Assert executes, one usually attaches
+  a dependency:
 
   ```python
   # Ensure maximum element of x is smaller or equal to 1
@@ -116,7 +141,22 @@ def Assert(condition, data, summarize=None, name=None):
   Returns:
     assert_op: An `Operation` that, when executed, raises a
     `tf.errors.InvalidArgumentError` if `condition` is not true.
+    @compatibility{eager} returns None.
+
+  Raises:
+    @compatibility{eager} `tf.errors.InvalidArgumentError` if `condition`
+    is not true
   """
+  if context.in_eager_mode():
+    if not condition:
+      xs = ops.convert_n_to_tensor(data)
+      data_str = [_summarize_eager(x, summarize) for x in xs]
+      raise errors.InvalidArgumentError(
+          node_def=None, op=None,
+          message="Expected '%s' to be true. Summarized data: %s" % (
+              condition, "\n".join(data_str)))
+    return
+
   with ops.name_scope(name, "Assert", [condition, data]) as name:
     xs = ops.convert_n_to_tensor(data)
     if all([x.dtype in {dtypes.string, dtypes.int32} for x in xs]):
@@ -132,6 +172,8 @@ def Assert(condition, data, summarize=None, name=None):
             condition, data, summarize, name="Assert")
       guarded_assert = cond(
           condition, no_op, true_assert, name="AssertGuard")
+      if context.in_eager_mode():
+        return
       return guarded_assert.op
 
 
@@ -791,6 +833,8 @@ class GradLoopState(object):
         self._grad_sync = control_trigger(name="b_sync")
       self._grad_sync._set_control_flow_context(self._grad_context)
       self._grad_index.op._add_control_input(self._grad_sync)
+      if self._grad_context.outer_context:
+        self._grad_context.outer_context.AddInnerOp(self._grad_sync)
     return self._grad_sync
 
   @property
@@ -1496,7 +1540,8 @@ class ControlFlowContext(object):
 
   def AddInnerOp(self, op):
     """Notifies a scope about an operator added to an inner scope."""
-    pass
+    if self._outer_context:
+      self._outer_context.AddInnerOp(op)
 
   def GetControlPivot(self):
     """Returns the pivot node for this context, or None."""
@@ -1633,6 +1678,9 @@ class CondContext(ControlFlowContext):
         self._values.add(result.name)
       with ops.control_dependencies(None):
         result = _SwitchRefOrTensor(result, self._pred)[self._branch]
+        if self._outer_context:
+          self._outer_context.AddInnerOp(result.op)
+
       result.op.graph.prevent_fetching(result.op)
       # pylint: disable=protected-access
       result.op._set_control_flow_context(self)
@@ -1675,6 +1723,9 @@ class CondContext(ControlFlowContext):
     if self._outer_context or not IsLoopExit(op):
       op.graph.prevent_fetching(op)
 
+    if self._outer_context:
+      self._outer_context.AddInnerOp(op)
+
   def _ProcessOutputTensor(self, val):
     """Process an output tensor of a conditional branch."""
     real_val = val
@@ -1713,7 +1764,19 @@ class CondContext(ControlFlowContext):
 
   def BuildCondBranch(self, fn):
     """Add the subgraph defined by fn() to the graph."""
+    pre_summaries = ops.get_collection(ops.GraphKeys._SUMMARY_COLLECTION)  # pylint: disable=protected-access
     original_result = fn()
+    post_summaries = ops.get_collection(ops.GraphKeys._SUMMARY_COLLECTION)  # pylint: disable=protected-access
+    if len(post_summaries) > len(pre_summaries):
+      new_summaries = post_summaries[len(pre_summaries):]
+      summary_ref = ops.get_collection_ref(ops.GraphKeys._SUMMARY_COLLECTION)  # pylint: disable=protected-access
+      summary_ref[:] = pre_summaries
+      with ops.control_dependencies(new_summaries):
+        if original_result is None:
+          return no_op(), None
+        else:
+          original_result = nest.map_structure(
+              array_ops.identity, original_result)
     if original_result is None:
       return None, None
 
@@ -1823,12 +1886,12 @@ def cond(pred, true_fn=None, false_fn=None, strict=False, name=None,
   if not callable(false_fn):
     raise TypeError("false_fn must be callable.")
 
-  if context.in_eager_mode():
-    if pred:
-      return true_fn()
-    return false_fn()
-
   with ops.name_scope(name, "cond", [pred]):
+    if context.in_eager_mode():
+      if pred:
+        return _UnpackIfSingleton(true_fn())
+      return _UnpackIfSingleton(false_fn())
+
     # Add the Switch to the graph.
     if isinstance(pred, bool):
       raise TypeError("pred must not be a Python bool")
@@ -2578,9 +2641,23 @@ class WhileContext(ControlFlowContext):
     packed_vars_for_body = nest.pack_sequence_as(
         structure=original_loop_vars,
         flat_sequence=vars_for_body_with_tensor_arrays)
+    pre_summaries = ops.get_collection(ops.GraphKeys._SUMMARY_COLLECTION)  # pylint: disable=protected-access
     body_result = body(*packed_vars_for_body)
+    post_summaries = ops.get_collection(ops.GraphKeys._SUMMARY_COLLECTION)  # pylint: disable=protected-access
     if not nest.is_sequence(body_result):
       body_result = [body_result]
+    if len(post_summaries) > len(pre_summaries):
+      new_summaries = post_summaries[len(pre_summaries):]
+      summary_ref = ops.get_collection_ref(ops.GraphKeys._SUMMARY_COLLECTION)  # pylint: disable=protected-access
+      summary_ref[:] = pre_summaries
+      with ops.control_dependencies(new_summaries):
+        def map_fn(x):
+          # TODO(apassos) figure out how to trigger with tensor arrays as well
+          if isinstance(x, tensor_array_ops.TensorArray):
+            return x
+          return array_ops.identity(x)
+        body_result = nest.map_structure(map_fn, body_result)
+
     # Compare the structure types of input and output of body.
     # For backwards compatibility, the first layer is forced to a list
     # during this comparison, because inputs are typically lists and
@@ -2657,7 +2734,7 @@ class WhileContext(ControlFlowContext):
         if shape is not None:
           xs.append(shape)
       for x in xs:
-        inp_op = x.op.inputs[0]
+        inp_op = x.op.inputs[0].op
         control_inputs = graph._control_dependencies_for_inputs([inp_op])
         outer_control_inputs = [op for op in control_inputs
                                 if self._IsInOuterContext(op)]
@@ -2898,7 +2975,7 @@ def _GroupControlDeps(dev, deps, name=None):
 def group(*inputs, **kwargs):
   """Create an op that groups multiple operations.
 
-  When this op finishes, all ops in `input` have finished. This op has no
+  When this op finishes, all ops in `inputs` have finished. This op has no
   output.
 
   See also @{tf.tuple$tuple} and
@@ -2906,7 +2983,6 @@ def group(*inputs, **kwargs):
 
   Args:
     *inputs: Zero or more tensors to group.
-    **kwargs: Optional parameters to pass when constructing the NodeDef.
     name: A name for this operation (optional).
 
   Returns:
@@ -2927,7 +3003,16 @@ def group(*inputs, **kwargs):
 
     # Sorts *inputs according to their devices.
     ops_on_device = {}  # device -> operations specified on the device.
-    for inp in inputs:
+    for inp in nest.flatten(inputs):
+      if not hasattr(inp, "device"):
+        raise TypeError("Expected tf.group() expected Tensor arguments not "
+                        "'%s' with type '%s'" % (inp, type(inp)))
+      if not hasattr(inp, "device"):
+        if isinstance(inp, list):
+          raise TypeError("To call tf.group() with a list, use "
+                          "tf.group(*[...]) not tf.group([...]).")
+        raise TypeError("Expected tf.group() expected Tensor arguments not "
+                        "'%s' with type '%s'" % (inp, type(inp)))
       dev = inp.device
       if dev in ops_on_device:
         ops_on_device[dev].append(inp)
@@ -3039,7 +3124,7 @@ def case(pred_fn_pairs, default=None, exclusive=False, strict=False,
 
   If `exclusive==True`, all predicates are evaluated, and an exception is
   thrown if more than one of the predicates evaluates to `True`.
-  If `exclusive==False`, execution stops are the first predicate which
+  If `exclusive==False`, execution stops at the first predicate which
   evaluates to True, and the tensors generated by the corresponding function
   are returned immediately. If none of the predicates evaluate to True, this
   operation returns the tensors generated by `default`.
