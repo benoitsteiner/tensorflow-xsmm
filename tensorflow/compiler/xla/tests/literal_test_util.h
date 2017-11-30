@@ -50,12 +50,20 @@ class LiteralTestUtil {
  public:
   // Asserts that the given shapes have the same rank, dimension sizes, and
   // primitive types.
+  static ::testing::AssertionResult EqualShapes(const Shape& expected,
+                                                const Shape& actual);
   static void AssertEqualShapes(const Shape& expected, const Shape& actual);
 
   // Asserts that the provided shapes are equal as defined in AssertEqualShapes
   // and that they have the same layout.
   static void AssertEqualShapesAndLayouts(const Shape& expected,
                                           const Shape& actual);
+
+  // Converts a bfloat16 literal to a float literal.
+  static std::unique_ptr<Literal> ConvertBF16ToF32(const Literal& bf16_literal);
+
+  // Converts a float literal to a bfloat16 literal.
+  static std::unique_ptr<Literal> ConvertF32ToBF16(const Literal& f32_literal);
 
   // Asserts that the expected and actual literals are (bitwise) equal for all
   // elements in the literal. Also, asserts that the rank, dimensions sizes, and

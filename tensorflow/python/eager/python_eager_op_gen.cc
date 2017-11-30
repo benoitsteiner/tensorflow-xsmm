@@ -17,6 +17,7 @@ limitations under the License.
 #include <stdio.h>
 #include <sstream>
 #include <unordered_map>
+#include "tensorflow/core/framework/api_def.pb.h"
 #include "tensorflow/core/framework/attr_value.pb.h"
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_def.pb_text.h"
@@ -100,8 +101,9 @@ string TensorPBString(const TensorProto& pb) {
 
 class GenEagerPythonOp : public python_op_gen_internal::GenPythonOp {
  public:
-  GenEagerPythonOp(const OpDef& op_def, const string& function_name)
-      : python_op_gen_internal::GenPythonOp(op_def, function_name) {
+  GenEagerPythonOp(const OpDef& op_def, const ApiDef& api_def,
+                   const string& function_name)
+      : python_op_gen_internal::GenPythonOp(op_def, api_def, function_name) {
     op_name_ = function_name_;
     op_name_.Consume("_");
   }
@@ -139,8 +141,9 @@ class GenEagerPythonOp : public python_op_gen_internal::GenPythonOp {
   std::unordered_map<string, string> attr_expressions_;
 };
 
-string GetEagerPythonOp(const OpDef& op_def, const string& function_name) {
-  return GenEagerPythonOp(op_def, function_name).Code();
+string GetEagerPythonOp(const OpDef& op_def, const ApiDef& api_def,
+                        const string& function_name) {
+  return GenEagerPythonOp(op_def, api_def, function_name).Code();
 }
 
 string GenEagerPythonOp::FlattenInputs(
@@ -394,7 +397,9 @@ string GenEagerPythonOp::Code() {
 
   // Handle graph-mode case
   strings::StrAppend(&result_,
-                     "  if _context.in_graph_mode():\n"
+                     "  _ctx = _context.context()\n"
+
+                     "  if _ctx.in_graph_mode():\n"
                      "    _, _, _op = _op_def_lib._apply_op_helper(\n");
   AddBodyNoReturn("        ");
   if (num_outs_ > 0) {
@@ -410,7 +415,7 @@ string GenEagerPythonOp::Code() {
                          "    if not _result:\n"
                          "      return _op\n");
     }
-    strings::StrAppend(&result_, "    _inputs_flat = ", inputs, "\n");
+    strings::StrAppend(&result_, "    _inputs_flat = _op.inputs\n");
 
     // Compute graph-mode attrs.
     if (op_def_.attr_size() > 0) {
@@ -478,11 +483,18 @@ string GenEagerPythonOp::Code() {
   }
 
   bool eager_allowed = true;
+  string ref_arg;
   for (const auto& arg : op_def_.input_arg()) {
-    if (arg.is_ref()) eager_allowed = false;
+    if (arg.is_ref()) {
+      eager_allowed = false;
+      ref_arg = arg.name();
+    }
   }
   for (const auto& arg : op_def_.output_arg()) {
-    if (arg.is_ref()) eager_allowed = false;
+    if (arg.is_ref()) {
+      eager_allowed = false;
+      ref_arg = arg.name();
+    }
   }
 
   if (eager_allowed) {
@@ -495,7 +507,8 @@ string GenEagerPythonOp::Code() {
     strings::StrAppend(&result_,
                        "    raise RuntimeError(\n"
                        "        \"",
-                       op_name_, " op does not support eager execution.\")\n");
+                       op_name_, " op does not support eager execution. ",
+                       "Arg '", ref_arg, "'' is a ref.\")\n");
   }
 
   if (num_outs_ > 0) {
@@ -518,6 +531,8 @@ string GenEagerPythonOp::Code() {
       strings::StrAppend(&result_, "  _result = _", op_def_.name(),
                          "Output._make(_result)\n");
     }
+  } else {
+    strings::StrAppend(&result_, "    _result = None\n");
   }
   strings::StrAppend(&result_, "  return _result\n\n");
   return prelude_ + result_;
@@ -544,8 +559,8 @@ void GenEagerPythonOp::AddEagerInferredAttrs() {
         std::vector<string> output_sizes;
         const string flattened =
             FlattenInputs(&arg_list->second, &output_sizes);
-        string conversion =
-            strings::StrCat("_execute.args_to_matching_eager(", flattened);
+        string conversion = strings::StrCat("_execute.args_to_matching_eager(",
+                                            flattened, ", _ctx");
         if (attr.has_default_value()) {
           strings::StrAppend(
               &conversion, ", ",
@@ -579,8 +594,6 @@ void GenEagerPythonOp::AddEagerInferredAttrs() {
           strings::StrAppend(&result_, "    ", VectorToTuple(p), " = ",
                              inputs_var, "\n");
         }
-        strings::StrAppend(&result_, "    ", var_name, " = ", var_name,
-                           ".as_datatype_enum\n");
       } else if (attr.type() == "list(type)") {
         // NOTE: We ignore default values for these attrs, since it is
         // unclear how you would use it, and the one use case is
@@ -606,10 +619,7 @@ void GenEagerPythonOp::AddEagerInferredAttrs() {
           conversion = "_execute.convert_to_mixed_eager_tensors";
         }
         strings::StrAppend(&result_, "    ", var_name, ", ", inputs_var, " = ",
-                           conversion, "(", inputs_var, ")\n");
-        strings::StrAppend(&result_, "    ", var_name,
-                           " = [_t.as_datatype_enum for _t in ", var_name,
-                           "]\n");
+                           conversion, "(", inputs_var, ", _ctx)\n");
       }
     }
   }
@@ -649,15 +659,15 @@ void GenEagerPythonOp::AddEagerAttrs() {
 
 void GenEagerPythonOp::AddEagerExecute(const string& num_outputs_expr) {
   const string return_prefix = "    _result = _execute.execute(";
-  const string return_args =
-      strings::StrCat("b\"", op_def_.name(), "\", ", num_outputs_expr,
-                      ", inputs=_inputs_flat, attrs=_attrs, name=name)");
+  const string return_args = strings::StrCat(
+      "b\"", op_def_.name(), "\", ", num_outputs_expr,
+      ", inputs=_inputs_flat, attrs=_attrs, ctx=_ctx, name=name)");
   strings::StrAppend(&result_,
                      // Wrap the arguments, and indent to the (.
                      WordWrap(return_prefix, return_args, kRightMargin), "\n");
 }
 
-string GetEagerPythonOps(const OpList& ops,
+string GetEagerPythonOps(const OpList& ops, const ApiDefMap& api_defs,
                          const std::vector<string>& hidden_ops,
                          bool require_shapes,
                          const string& source_file_name = "") {
@@ -693,6 +703,7 @@ from tensorflow.python.framework import common_shapes as _common_shapes
 from tensorflow.python.framework import op_def_registry as _op_def_registry
 from tensorflow.python.framework import ops as _ops
 from tensorflow.python.framework import op_def_library as _op_def_library
+from tensorflow.python.util.tf_export import tf_export
 
 )");
 
@@ -722,7 +733,9 @@ from tensorflow.python.framework import op_def_library as _op_def_library
       continue;
     }
 
-    strings::StrAppend(&result, GetEagerPythonOp(op_def, function_name));
+    const auto* api_def = api_defs.GetApiDef(op_def.name());
+    strings::StrAppend(&result,
+                       GetEagerPythonOp(op_def, *api_def, function_name));
 
     if (!require_shapes) {
       strings::StrAppend(&result, "_ops.RegisterShape(\"", op_def.name(),
@@ -755,19 +768,21 @@ from tensorflow.python.framework import op_def_library as _op_def_library
 
 }  // namespace
 
-void PrintEagerPythonOps(const OpList& ops,
+void PrintEagerPythonOps(const OpList& ops, const ApiDefMap& api_defs,
                          const std::vector<string>& hidden_ops,
                          bool require_shapes, const string& source_file_name) {
-  printf("%s",
-         GetEagerPythonOps(ops, hidden_ops, require_shapes, source_file_name)
-             .c_str());
+  printf("%s", GetEagerPythonOps(ops, api_defs, hidden_ops, require_shapes,
+                                 source_file_name)
+                   .c_str());
 }
 
 string GetEagerPythonWrappers(const char* op_list_buf, size_t op_list_len) {
   string op_list_str(op_list_buf, op_list_len);
   OpList ops;
   ops.ParseFromString(op_list_str);
-  return GetEagerPythonOps(ops, {}, false);
+
+  ApiDefMap api_def_map(ops);
+  return GetEagerPythonOps(ops, api_def_map, {}, false);
 }
 
 }  // namespace tensorflow
