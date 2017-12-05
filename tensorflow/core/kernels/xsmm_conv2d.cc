@@ -39,6 +39,11 @@ void dummy_xsmm_conv2d_ensure_file_is_not_empty();
 #include "include/libxsmm_cpuid.h"
 #include "include/libxsmm_malloc.h"
 
+#define CHECK_LIBXSMM(CONDITION_OK, MESSAGE) if (!(CONDITION_OK)) VLOG(0) << (MESSAGE)
+#define CHECK_LIBXSMM_DNN(STATUS, MESSAGE) CHECK_LIBXSMM(LIBXSMM_DNN_SUCCESS == (STATUS), MESSAGE) \
+  << " failed: " << libxsmm_dnn_get_error(STATUS);
+
+
 namespace tensorflow {
 
 // Xsmm*Conv2D are wrappers for libxsmm direct convolutions.
@@ -75,16 +80,6 @@ bool CanUseXsmmConv2D(const libxsmm_dnn_conv_desc& desc,
 typedef Eigen::ThreadPoolDevice CPUDevice;
 
 namespace functor {
-
-LIBXSMM_INLINE void check_libxsmm(bool condition_ok, const std::string& msg) {
-  if (!condition_ok) VLOG(0) << msg;
-}
-
-LIBXSMM_INLINE void check_libxsmm_dnn(libxsmm_dnn_err_t status, const std::string& msg) {
-  if (status != LIBXSMM_DNN_SUCCESS) {
-    VLOG(0) << msg << " failed: " << libxsmm_dnn_get_error(status);
-  }
-}
 
 LIBXSMM_INLINE void copy_RSCK_to_custom(const float* rsck, float* kcrs, int R,
                                         int S, int C, int K, int blocksifm,
@@ -157,19 +152,19 @@ public:
       libxsmm_dnn_err_t status;
       libxsmm_dnn_registry_value regentry;
       regentry.handle = libxsmm_dnn_create_conv_layer(regkey.descriptor, &status);
-      check_libxsmm_dnn(status, "create handle");
+      CHECK_LIBXSMM_DNN(status, "create handle");
 
       regentry.layout_input = libxsmm_dnn_create_tensor_datalayout(
         regentry.handle, LIBXSMM_DNN_INPUT, &status);
-      check_libxsmm_dnn(status, "create input layout");
+      CHECK_LIBXSMM_DNN(status, "create input layout");
 
       regentry.layout_output = libxsmm_dnn_create_tensor_datalayout(
         regentry.handle, LIBXSMM_DNN_OUTPUT, &status);
-      check_libxsmm_dnn(status, "create output layout");
+      CHECK_LIBXSMM_DNN(status, "create output layout");
 
       regentry.layout_filter = libxsmm_dnn_create_tensor_datalayout(
         regentry.handle, LIBXSMM_DNN_FILTER, &status);
-      check_libxsmm_dnn(status, "create filter layout");
+      CHECK_LIBXSMM_DNN(status, "create filter layout");
 
       container.insert(std::make_pair(regkey, regentry));
       return regentry;
@@ -180,16 +175,16 @@ public:
   ~libxsmm_dnn_registry_type() {
     const container_type::const_iterator end = container.end();
     for (container_type::const_iterator i = container.begin(); i != end; ++i) {
-      check_libxsmm_dnn(
+      CHECK_LIBXSMM_DNN(
         libxsmm_dnn_destroy_tensor_datalayout(i->second.layout_input),
         "destroy input layout");
-      check_libxsmm_dnn(
+      CHECK_LIBXSMM_DNN(
         libxsmm_dnn_destroy_tensor_datalayout(i->second.layout_output),
         "destroy output layout");
-      check_libxsmm_dnn(
+      CHECK_LIBXSMM_DNN(
         libxsmm_dnn_destroy_tensor_datalayout(i->second.layout_filter),
         "destroy filter layout");
-      check_libxsmm_dnn(
+      CHECK_LIBXSMM_DNN(
         libxsmm_dnn_destroy_conv_layer(i->second.handle),
         "destroy handle");
     }
@@ -223,7 +218,7 @@ static bool CallLibxsmmConvGeneric(OpKernelContext* ctx,
   if (status == LIBXSMM_DNN_WARN_FALLBACK) {
     return false;  // Use non-libxsmm code
   }
-  check_libxsmm_dnn(status, "code generation");
+  CHECK_LIBXSMM_DNN(status, "code generation");
 
 #if defined(LIBXSMM_DETAILED_TIMING)
   l_tick2 = libxsmm_timer_tick();
@@ -282,7 +277,7 @@ static bool CallLibxsmmConvGeneric(OpKernelContext* ctx,
   } else if (kind == LIBXSMM_DNN_COMPUTE_KIND_UPD) {
     // weight update buffer must be in the right format (LIBXSMM_DNN_TENSOR_FORMAT_RSCK_PTR)
     libxsmm_filter = libxsmm_dnn_link_tensor(regentry.layout_filter, filter, &status);
-    check_libxsmm_dnn(status, "link filter with layout");
+    CHECK_LIBXSMM_DNN(status, "link filter with layout");
   }
 #else
   memset(native_filter, 0, filter_size * sizeof(float));
@@ -294,51 +289,51 @@ static bool CallLibxsmmConvGeneric(OpKernelContext* ctx,
 
   // LIBXSMM_DNN_TENSOR_FORMAT_NHWC_PTR
   libxsmm_input = libxsmm_dnn_link_tensor(regentry.layout_input, input, &status);
-  check_libxsmm_dnn(status, "link input buffer with layout");
+  CHECK_LIBXSMM_DNN(status, "link input buffer with layout");
 
   // LIBXSMM_DNN_TENSOR_FORMAT_NHWC_PTR
   libxsmm_output = libxsmm_dnn_link_tensor(regentry.layout_output, output, &status);
-  check_libxsmm_dnn(status, "link output buffer with layout");
+  CHECK_LIBXSMM_DNN(status, "link output buffer with layout");
 
   if (kind == LIBXSMM_DNN_COMPUTE_KIND_FWD ||
       kind == LIBXSMM_DNN_COMPUTE_KIND_BWD) {
     // LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM_PTR
     libxsmm_filter = libxsmm_dnn_link_tensor(regentry.layout_filter, native_filter, &status);
-    check_libxsmm_dnn(status, "link filter with layout");
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(status, "link filter with layout");
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_bind_tensor(regentry.handle, libxsmm_filter, LIBXSMM_DNN_FILTER),
       "bind filter to handle");
   }
   if (kind == LIBXSMM_DNN_COMPUTE_KIND_FWD) {
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_bind_tensor(regentry.handle, libxsmm_input, LIBXSMM_DNN_REGULAR_INPUT),
       "bind input forward");
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_bind_tensor(regentry.handle, libxsmm_filter, LIBXSMM_DNN_REGULAR_FILTER),
       "bind filter forward");
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_bind_tensor(regentry.handle, libxsmm_output, LIBXSMM_DNN_REGULAR_OUTPUT),
       "bind output forward");
   } else if (kind == LIBXSMM_DNN_COMPUTE_KIND_BWD) {
-    check_libxsmm_dnn(libxsmm_dnn_zero_tensor(libxsmm_input), "zeroing input");
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(libxsmm_dnn_zero_tensor(libxsmm_input), "zeroing input");
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_bind_tensor(regentry.handle, libxsmm_input, LIBXSMM_DNN_GRADIENT_INPUT),
       "bind input backward");
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_bind_tensor(regentry.handle, libxsmm_filter, LIBXSMM_DNN_REGULAR_FILTER),
       "bind filter backward");
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_bind_tensor(regentry.handle, libxsmm_output, LIBXSMM_DNN_GRADIENT_OUTPUT),
       "bind output backward");
   } else if (kind == LIBXSMM_DNN_COMPUTE_KIND_UPD) {
-    check_libxsmm_dnn(libxsmm_dnn_zero_tensor(libxsmm_filter), "zeroing filter");
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(libxsmm_dnn_zero_tensor(libxsmm_filter), "zeroing filter");
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_bind_tensor(regentry.handle, libxsmm_input, LIBXSMM_DNN_REGULAR_INPUT),
       "bind input weight update");
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_bind_tensor(regentry.handle, libxsmm_filter, LIBXSMM_DNN_GRADIENT_FILTER),
       "bind filter weight update");
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_bind_tensor(regentry.handle, libxsmm_output, LIBXSMM_DNN_GRADIENT_OUTPUT),
       "bind output weight update");
   } else {
@@ -350,10 +345,10 @@ static bool CallLibxsmmConvGeneric(OpKernelContext* ctx,
 #endif
 
   const size_t scratch_size = libxsmm_dnn_get_scratch_size(regentry.handle, LIBXSMM_DNN_COMPUTE_KIND_ALL, &status);
-  check_libxsmm_dnn(status, "get scratch size");
+  CHECK_LIBXSMM_DNN(status, "get scratch size");
   void *const scratch = libxsmm_aligned_scratch(scratch_size, 2097152/*alignment*/);
-  check_libxsmm(0 != scratch, "scratch memory allocation");
-  check_libxsmm_dnn(
+  CHECK_LIBXSMM(0 != scratch, "scratch memory allocation");
+  CHECK_LIBXSMM_DNN(
     libxsmm_dnn_bind_scratch(regentry.handle, LIBXSMM_DNN_COMPUTE_KIND_ALL, scratch),
     "binding scratch");
 
@@ -374,7 +369,7 @@ static bool CallLibxsmmConvGeneric(OpKernelContext* ctx,
 
   for (int i = 0; i < num_threads; ++i) {
     worker_threads->workers->Schedule([=, &counter]() {
-      check_libxsmm_dnn(
+      CHECK_LIBXSMM_DNN(
         libxsmm_dnn_execute_st(regentry.handle, kind, 0, i),
         "worker");
       counter.DecrementCount();
@@ -384,7 +379,7 @@ static bool CallLibxsmmConvGeneric(OpKernelContext* ctx,
 #else
 # pragma omp parallel
   {
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_execute_st(regentry.handle, kind, 0, omp_get_thread_num()),
       "worker");
   }
@@ -403,45 +398,45 @@ static bool CallLibxsmmConvGeneric(OpKernelContext* ctx,
 #endif
 
   /* clean up */
-  check_libxsmm_dnn(
+  CHECK_LIBXSMM_DNN(
       libxsmm_dnn_release_scratch(regentry.handle, LIBXSMM_DNN_COMPUTE_KIND_ALL),
       "release scratch");
   if (kind == LIBXSMM_DNN_COMPUTE_KIND_FWD) {
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_release_tensor(regentry.handle, LIBXSMM_DNN_REGULAR_INPUT),
       "release input");
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_release_tensor(regentry.handle, LIBXSMM_DNN_REGULAR_OUTPUT),
       "release output");
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_release_tensor(regentry.handle, LIBXSMM_DNN_REGULAR_FILTER),
       "release filter");
   } else if (kind == LIBXSMM_DNN_COMPUTE_KIND_BWD) {
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_release_tensor(regentry.handle, LIBXSMM_DNN_GRADIENT_INPUT),
       "release input");
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_release_tensor(regentry.handle, LIBXSMM_DNN_GRADIENT_OUTPUT),
       "release output");
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_release_tensor(regentry.handle, LIBXSMM_DNN_REGULAR_FILTER),
       "release filter");
   } else if (kind == LIBXSMM_DNN_COMPUTE_KIND_UPD) {
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_release_tensor(regentry.handle, LIBXSMM_DNN_REGULAR_INPUT),
       "release input");
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_release_tensor(regentry.handle, LIBXSMM_DNN_GRADIENT_OUTPUT),
       "release output");
-    check_libxsmm_dnn(
+    CHECK_LIBXSMM_DNN(
       libxsmm_dnn_release_tensor(regentry.handle, LIBXSMM_DNN_GRADIENT_FILTER),
       "release filter");
   } else {
     /* shouldn't happen */
   }
-  check_libxsmm_dnn(libxsmm_dnn_destroy_tensor(libxsmm_input), "destroy input");
-  check_libxsmm_dnn(libxsmm_dnn_destroy_tensor(libxsmm_output), "destroy output");
-  check_libxsmm_dnn(libxsmm_dnn_destroy_tensor(libxsmm_filter), "destroy filter");
+  CHECK_LIBXSMM_DNN(libxsmm_dnn_destroy_tensor(libxsmm_input), "destroy input");
+  CHECK_LIBXSMM_DNN(libxsmm_dnn_destroy_tensor(libxsmm_output), "destroy output");
+  CHECK_LIBXSMM_DNN(libxsmm_dnn_destroy_tensor(libxsmm_filter), "destroy filter");
 
 #if defined(LIBXSMM_DETAILED_TIMING)
   l_tick9 = libxsmm_timer_tick();
