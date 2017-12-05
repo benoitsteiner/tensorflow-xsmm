@@ -180,10 +180,18 @@ public:
   ~libxsmm_dnn_registry_type() {
     const container_type::const_iterator end = container.end();
     for (container_type::const_iterator i = container.begin(); i != end; ++i) {
-      check_libxsmm_dnn(libxsmm_dnn_destroy_tensor_datalayout(layout_input), "destroy input layout");
-      check_libxsmm_dnn(libxsmm_dnn_destroy_tensor_datalayout(layout_output), "destroy output layout");
-      check_libxsmm_dnn(libxsmm_dnn_destroy_tensor_datalayout(layout_filter), "destroy filter layout");
-      check_libxsmm_dnn(libxsmm_dnn_destroy_conv_layer(i->second.handle), "destroy handle");
+      check_libxsmm_dnn(
+        libxsmm_dnn_destroy_tensor_datalayout(i->second.layout_input),
+        "destroy input layout");
+      check_libxsmm_dnn(
+        libxsmm_dnn_destroy_tensor_datalayout(i->second.layout_output),
+        "destroy output layout");
+      check_libxsmm_dnn(
+        libxsmm_dnn_destroy_tensor_datalayout(i->second.layout_filter),
+        "destroy filter layout");
+      check_libxsmm_dnn(
+        libxsmm_dnn_destroy_conv_layer(i->second.handle),
+        "destroy handle");
     }
   }
 
@@ -312,7 +320,7 @@ static bool CallLibxsmmConvGeneric(OpKernelContext* ctx,
       libxsmm_dnn_bind_tensor(regentry.handle, libxsmm_output, LIBXSMM_DNN_REGULAR_OUTPUT),
       "bind output forward");
   } else if (kind == LIBXSMM_DNN_COMPUTE_KIND_BWD) {
-    check_libxsmm_dnn(libxsmm_dnn_zero_buffer(libxsmm_input), "zeroing input");
+    check_libxsmm_dnn(libxsmm_dnn_zero_tensor(libxsmm_input), "zeroing input");
     check_libxsmm_dnn(
       libxsmm_dnn_bind_tensor(regentry.handle, libxsmm_input, LIBXSMM_DNN_GRADIENT_INPUT),
       "bind input backward");
@@ -323,7 +331,7 @@ static bool CallLibxsmmConvGeneric(OpKernelContext* ctx,
       libxsmm_dnn_bind_tensor(regentry.handle, libxsmm_output, LIBXSMM_DNN_GRADIENT_OUTPUT),
       "bind output backward");
   } else if (kind == LIBXSMM_DNN_COMPUTE_KIND_UPD) {
-    check_libxsmm_dnn(libxsmm_dnn_zero_filter(libxsmm_filter), "zeroing filter");
+    check_libxsmm_dnn(libxsmm_dnn_zero_tensor(libxsmm_filter), "zeroing filter");
     check_libxsmm_dnn(
       libxsmm_dnn_bind_tensor(regentry.handle, libxsmm_input, LIBXSMM_DNN_REGULAR_INPUT),
       "bind input weight update");
@@ -406,7 +414,7 @@ static bool CallLibxsmmConvGeneric(OpKernelContext* ctx,
       libxsmm_dnn_release_tensor(regentry.handle, LIBXSMM_DNN_REGULAR_OUTPUT),
       "release output");
     check_libxsmm_dnn(
-      libxsmm_dnn_release_filter(regentry.handle, LIBXSMM_DNN_REGULAR_FILTER),
+      libxsmm_dnn_release_tensor(regentry.handle, LIBXSMM_DNN_REGULAR_FILTER),
       "release filter");
   } else if (kind == LIBXSMM_DNN_COMPUTE_KIND_BWD) {
     check_libxsmm_dnn(
@@ -416,7 +424,7 @@ static bool CallLibxsmmConvGeneric(OpKernelContext* ctx,
       libxsmm_dnn_release_tensor(regentry.handle, LIBXSMM_DNN_GRADIENT_OUTPUT),
       "release output");
     check_libxsmm_dnn(
-      libxsmm_dnn_release_filter(regentry.handle, LIBXSMM_DNN_REGULAR_FILTER),
+      libxsmm_dnn_release_tensor(regentry.handle, LIBXSMM_DNN_REGULAR_FILTER),
       "release filter");
   } else if (kind == LIBXSMM_DNN_COMPUTE_KIND_UPD) {
     check_libxsmm_dnn(
@@ -426,7 +434,7 @@ static bool CallLibxsmmConvGeneric(OpKernelContext* ctx,
       libxsmm_dnn_release_tensor(regentry.handle, LIBXSMM_DNN_GRADIENT_OUTPUT),
       "release output");
     check_libxsmm_dnn(
-      libxsmm_dnn_release_filter(regentry.handle, LIBXSMM_DNN_GRADIENT_FILTER),
+      libxsmm_dnn_release_tensor(regentry.handle, LIBXSMM_DNN_GRADIENT_FILTER),
       "release filter");
   } else {
     /* shouldn't happen */
