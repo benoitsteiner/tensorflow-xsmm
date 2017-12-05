@@ -301,7 +301,7 @@ static bool CallLibxsmmConvGeneric(OpKernelContext* ctx,
     libxsmm_filter = libxsmm_dnn_link_tensor(regentry.layout_filter, native_filter, &status);
     CHECK_LIBXSMM_DNN(status, "link filter with layout");
     CHECK_LIBXSMM_DNN(
-      libxsmm_dnn_bind_tensor(regentry.handle, libxsmm_filter, LIBXSMM_DNN_FILTER),
+      libxsmm_dnn_bind_tensor(regentry.handle, libxsmm_filter, LIBXSMM_DNN_REGULAR_FILTER),
       "bind filter to handle");
   }
   if (kind == LIBXSMM_DNN_COMPUTE_KIND_FWD) {
