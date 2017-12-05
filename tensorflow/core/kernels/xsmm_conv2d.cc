@@ -35,9 +35,8 @@ void dummy_xsmm_conv2d_ensure_file_is_not_empty();
 #include "tensorflow/core/lib/core/blocking_counter.h"
 #include "tensorflow/core/lib/core/threadpool.h"
 
-#include "libxsmm_main.h"  // TODO(bsteiner): API to avoid incl. header from src/
-#include "include/libxsmm_cpuid.h"
-#include "include/libxsmm_malloc.h"
+#include <libxsmm_main.h>  // TODO: proper API to query ifmblock/ofmblock, etc.
+#include <libxsmm_dnn.h>
 
 #define CHECK_LIBXSMM(CONDITION_OK, MESSAGE) if (!(CONDITION_OK)) VLOG(0) << (MESSAGE)
 #define CHECK_LIBXSMM_DNN(STATUS, MESSAGE) CHECK_LIBXSMM(LIBXSMM_DNN_SUCCESS == (STATUS), MESSAGE) \
@@ -152,8 +151,12 @@ public:
       libxsmm_dnn_err_t status;
       libxsmm_dnn_registry_value regentry;
       regentry.handle = libxsmm_dnn_create_conv_layer(regkey.descriptor, &status);
-      CHECK_LIBXSMM_DNN(status, "create handle");
-
+      if (LIBXSMM_DNN_WARN_FALLBACK != status) {
+        CHECK_LIBXSMM_DNN(status, "create handle");
+      }
+      else { // warning
+        VLOG(1) << libxsmm_dnn_get_error(status);
+      }
       regentry.layout_input = libxsmm_dnn_create_tensor_datalayout(
         regentry.handle, LIBXSMM_DNN_INPUT, &status);
       CHECK_LIBXSMM_DNN(status, "create input layout");
