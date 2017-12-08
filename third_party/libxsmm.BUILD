@@ -78,6 +78,7 @@ cc_library(
     ],
     defines = [
         "LIBXSMM_BUILD",
+        "LIBXSMM_CTOR",
         "__BLAS=0",
     ],
     includes = [
