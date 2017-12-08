@@ -145,9 +145,39 @@ private:
   container_type;
 
 public:
+  libxsmm_dnn_registry_type() {
+    LIBXSMM_LOCK_ATTR_INIT(LIBXSMM_LOCK_RWLOCK, &attr);
+    LIBXSMM_LOCK_INIT(LIBXSMM_LOCK_RWLOCK, &lock, &attr);
+  }
+  ~libxsmm_dnn_registry_type() {
+    LIBXSMM_LOCK_ACQUIRE(LIBXSMM_LOCK_RWLOCK, &lock);
+    const container_type::const_iterator end = container.end();
+    for (container_type::const_iterator i = container.begin(); i != end; ++i) {
+      CHECK_LIBXSMM_DNN(
+        libxsmm_dnn_destroy_tensor_datalayout(i->second.layout_input),
+        "destroy input layout");
+      CHECK_LIBXSMM_DNN(
+        libxsmm_dnn_destroy_tensor_datalayout(i->second.layout_output),
+        "destroy output layout");
+      CHECK_LIBXSMM_DNN(
+        libxsmm_dnn_destroy_tensor_datalayout(i->second.layout_filter),
+        "destroy filter layout");
+      CHECK_LIBXSMM_DNN(
+        libxsmm_dnn_destroy_conv_layer(i->second.handle),
+        "destroy handle");
+    }
+    LIBXSMM_LOCK_RELEASE(LIBXSMM_LOCK_RWLOCK, &lock);
+    LIBXSMM_LOCK_DESTROY(LIBXSMM_LOCK_RWLOCK, &lock);
+    LIBXSMM_LOCK_ATTR_DESTROY(LIBXSMM_LOCK_RWLOCK, &attr);
+  }
   libxsmm_dnn_registry_value find(const libxsmm_dnn_registry_key& regkey) {
-    const container_type::iterator i = container.find(regkey);
-    if (i == container.end()) {
+    container_type::iterator i;
+    LIBXSMM_LOCK_ACQREAD(LIBXSMM_LOCK_RWLOCK, &lock);
+    i = container.find(regkey);
+    LIBXSMM_LOCK_RELREAD(LIBXSMM_LOCK_RWLOCK, &lock);
+    if (i != container.end()) {
+      return i->second;
+    } else {
       libxsmm_dnn_err_t status;
       libxsmm_dnn_registry_value regentry;
       regentry.handle = libxsmm_dnn_create_conv_layer(regkey.descriptor, &status);
@@ -169,32 +199,18 @@ public:
         regentry.handle, LIBXSMM_DNN_FILTER, &status);
       CHECK_LIBXSMM_DNN(status, "create filter layout");
 
+      LIBXSMM_LOCK_ACQUIRE(LIBXSMM_LOCK_RWLOCK, &lock);
       container.insert(std::make_pair(regkey, regentry));
+      LIBXSMM_LOCK_RELEASE(LIBXSMM_LOCK_RWLOCK, &lock);
+
       return regentry;
-    } else {
-      return i->second;
-    }
-  }
-  ~libxsmm_dnn_registry_type() {
-    const container_type::const_iterator end = container.end();
-    for (container_type::const_iterator i = container.begin(); i != end; ++i) {
-      CHECK_LIBXSMM_DNN(
-        libxsmm_dnn_destroy_tensor_datalayout(i->second.layout_input),
-        "destroy input layout");
-      CHECK_LIBXSMM_DNN(
-        libxsmm_dnn_destroy_tensor_datalayout(i->second.layout_output),
-        "destroy output layout");
-      CHECK_LIBXSMM_DNN(
-        libxsmm_dnn_destroy_tensor_datalayout(i->second.layout_filter),
-        "destroy filter layout");
-      CHECK_LIBXSMM_DNN(
-        libxsmm_dnn_destroy_conv_layer(i->second.handle),
-        "destroy handle");
     }
   }
 
 private:
   container_type container;
+  LIBXSMM_LOCK_ATTR_TYPE(LIBXSMM_LOCK_RWLOCK) attr;
+  LIBXSMM_LOCK_TYPE(LIBXSMM_LOCK_RWLOCK) lock;
 } libxsmm_dnn_registry;
 
 // #define LIBXSMM_DETAILED_TIMING
