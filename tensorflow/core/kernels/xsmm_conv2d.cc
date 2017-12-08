@@ -146,6 +146,7 @@ private:
 
 public:
   libxsmm_dnn_registry_type() {
+    libxsmm_init();
     LIBXSMM_LOCK_ATTR_INIT(LIBXSMM_LOCK_RWLOCK, &attr);
     LIBXSMM_LOCK_INIT(LIBXSMM_LOCK_RWLOCK, &lock, &attr);
   }
@@ -169,6 +170,7 @@ public:
     LIBXSMM_LOCK_RELEASE(LIBXSMM_LOCK_RWLOCK, &lock);
     LIBXSMM_LOCK_DESTROY(LIBXSMM_LOCK_RWLOCK, &lock);
     LIBXSMM_LOCK_ATTR_DESTROY(LIBXSMM_LOCK_RWLOCK, &attr);
+    libxsmm_finalize();
   }
   libxsmm_dnn_registry_value find(const libxsmm_dnn_registry_key& regkey) {
     container_type::iterator i;
