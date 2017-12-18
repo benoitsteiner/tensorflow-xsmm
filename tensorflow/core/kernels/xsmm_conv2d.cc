@@ -177,36 +177,37 @@ public:
     LIBXSMM_LOCK_ACQREAD(LIBXSMM_LOCK_RWLOCK, &lock);
     i = container.find(regkey);
     LIBXSMM_LOCK_RELREAD(LIBXSMM_LOCK_RWLOCK, &lock);
-    if (i != container.end()) {
-      return i->second;
-    } else {
+    if (i == container.end()) {
       libxsmm_dnn_err_t status;
       libxsmm_dnn_registry_value regentry;
-      regentry.handle = libxsmm_dnn_create_conv_layer(regkey.descriptor, &status);
-      if (LIBXSMM_DNN_WARN_FALLBACK != status) {
-        CHECK_LIBXSMM_DNN(status, "create handle");
-      }
-      else { // warning
-        VLOG(1) << libxsmm_dnn_get_error(status);
-      }
-      regentry.layout_input = libxsmm_dnn_create_tensor_datalayout(
-        regentry.handle, LIBXSMM_DNN_INPUT, &status);
-      CHECK_LIBXSMM_DNN(status, "create input layout");
-
-      regentry.layout_output = libxsmm_dnn_create_tensor_datalayout(
-        regentry.handle, LIBXSMM_DNN_OUTPUT, &status);
-      CHECK_LIBXSMM_DNN(status, "create output layout");
-
-      regentry.layout_filter = libxsmm_dnn_create_tensor_datalayout(
-        regentry.handle, LIBXSMM_DNN_FILTER, &status);
-      CHECK_LIBXSMM_DNN(status, "create filter layout");
 
       LIBXSMM_LOCK_ACQUIRE(LIBXSMM_LOCK_RWLOCK, &lock);
-      container.insert(std::make_pair(regkey, regentry));
-      LIBXSMM_LOCK_RELEASE(LIBXSMM_LOCK_RWLOCK, &lock);
+      i = container.find(regkey); 
+      if (i == container.end()) { // re-check after lock acquisition
+        regentry.handle = libxsmm_dnn_create_conv_layer(regkey.descriptor, &status);
+        if (LIBXSMM_DNN_WARN_FALLBACK != status) {
+          CHECK_LIBXSMM_DNN(status, "create handle");
+        }
+        else { // warning
+          VLOG(1) << libxsmm_dnn_get_error(status);
+        }
+        regentry.layout_input = libxsmm_dnn_create_tensor_datalayout(
+          regentry.handle, LIBXSMM_DNN_INPUT, &status);
+        CHECK_LIBXSMM_DNN(status, "create input layout");
 
-      return regentry;
+        regentry.layout_output = libxsmm_dnn_create_tensor_datalayout(
+          regentry.handle, LIBXSMM_DNN_OUTPUT, &status);
+        CHECK_LIBXSMM_DNN(status, "create output layout");
+
+        regentry.layout_filter = libxsmm_dnn_create_tensor_datalayout(
+          regentry.handle, LIBXSMM_DNN_FILTER, &status);
+        CHECK_LIBXSMM_DNN(status, "create filter layout");
+
+        i = container.insert(std::make_pair(regkey, regentry)).first;
+      }
+      LIBXSMM_LOCK_RELEASE(LIBXSMM_LOCK_RWLOCK, &lock);
     }
+    return i->second;
   }
 
 private:
