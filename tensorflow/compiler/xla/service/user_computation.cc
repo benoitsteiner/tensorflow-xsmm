@@ -1506,7 +1506,7 @@ StatusOr<const OperationRequest*> LookUpRequest(
   return &session_computation.requests().at(handle_value);
 }
 
-// Returns the OperationRequestion corresponding to the root (result) of the
+// Returns the OperationRequest corresponding to the root (result) of the
 // session computation.
 StatusOr<const OperationRequest*> GetRoot(
     VersionedComputationHandle::Version version,
@@ -1552,8 +1552,8 @@ UserComputation::ComputeProgramShape(
             request.request().parameter_request();
         int64 param_no = parameter_request.parameter();
         // Parameters may be out of order so expand ProgramShape parameters
-        // until
-        // it is at least large enough to hold the current parameter number.
+        // until it is at least large enough to hold the current parameter
+        // number.
         while (program_shape->parameters_size() <= param_no) {
           program_shape->add_parameters();
           program_shape->add_parameter_names();

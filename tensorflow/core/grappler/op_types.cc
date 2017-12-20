@@ -26,7 +26,11 @@ namespace tensorflow {
 namespace grappler {
 
 bool IsAdd(const NodeDef& node) {
-  return node.op() == "Add" || node.op() == "AddV2";
+  if (node.op() == "AddV2" || node.op() == "Add") {
+    DataType type = node.attr().at("T").type();
+    return type != DT_STRING;
+  }
+  return false;
 }
 
 bool IsAddN(const NodeDef& node) { return node.op() == "AddN"; }
@@ -81,6 +85,8 @@ bool IsDequeueOp(const NodeDef& node) {
 
 bool IsDiv(const NodeDef& node) { return node.op() == "Div"; }
 
+bool IsEluGrad(const NodeDef& node) { return node.op() == "EluGrad"; }
+
 bool IsEnter(const NodeDef& node) {
   const auto& op = node.op();
   return op == "Enter" || op == "RefEnter";
@@ -101,6 +107,8 @@ bool IsIdentity(const NodeDef& node) {
   const auto& op = node.op();
   return op == "Identity" || op == "RefIdentity";
 }
+
+bool IsInvGrad(const NodeDef& node) { return node.op() == "InvGrad"; }
 
 bool IsMatMul(const NodeDef& node) {
   const auto& op = node.op();
@@ -132,7 +140,9 @@ bool IsPlaceholder(const NodeDef& node) {
 
 bool IsRealDiv(const NodeDef& node) { return node.op() == "RealDiv"; }
 
-bool IsReluGrad(const NodeDef& node) { return node.op() == "ReluGrad"; }
+bool IsReciprocalGrad(const NodeDef& node) {
+  return node.op() == "ReciprocalGrad";
+}
 
 bool IsRecv(const NodeDef& node) { return node.op() == "_Recv"; }
 
@@ -142,6 +152,10 @@ bool IsReduction(const NodeDef& node) {
          op == "Mean" || op == "Any" || op == "All";
 }
 
+bool IsReluGrad(const NodeDef& node) { return node.op() == "ReluGrad"; }
+
+bool IsRelu6Grad(const NodeDef& node) { return node.op() == "Relu6Grad"; }
+
 bool IsReshape(const NodeDef& node) { return (node.op() == "Reshape"); }
 
 bool IsRestore(const NodeDef& node) {
@@ -149,15 +163,27 @@ bool IsRestore(const NodeDef& node) {
           node.op() == "RestoreSlice");
 }
 
+bool IsRsqrtGrad(const NodeDef& node) { return node.op() == "RsqrtGrad"; }
+
+bool IsSeluGrad(const NodeDef& node) { return node.op() == "SeluGrad"; }
+
 bool IsSend(const NodeDef& node) { return node.op() == "_Send"; }
 
 bool IsShape(const NodeDef& node) { return node.op() == "Shape"; }
 
 bool IsShapeN(const NodeDef& node) { return node.op() == "ShapeN"; }
 
+bool IsSigmoidGrad(const NodeDef& node) { return node.op() == "SigmoidGrad"; }
+
 bool IsSlice(const NodeDef& node) { return node.op() == "Slice"; }
 
+bool IsSoftplusGrad(const NodeDef& node) { return node.op() == "SoftplusGrad"; }
+
+bool IsSoftsignGrad(const NodeDef& node) { return node.op() == "SoftsignGrad"; }
+
 bool IsSplit(const NodeDef& node) { return node.op() == "Split"; }
+
+bool IsSqrtGrad(const NodeDef& node) { return node.op() == "SqrtGrad"; }
 
 bool IsSquaredDifference(const NodeDef& node) {
   return node.op() == "SquaredDifference";
@@ -178,6 +204,8 @@ bool IsSwitch(const NodeDef& node) {
   const auto& op = node.op();
   return op == "Switch" || op == "RefSwitch";
 }
+
+bool IsTanhGrad(const NodeDef& node) { return node.op() == "TanhGrad"; }
 
 bool IsTranspose(const NodeDef& node) { return node.op() == "Transpose"; }
 

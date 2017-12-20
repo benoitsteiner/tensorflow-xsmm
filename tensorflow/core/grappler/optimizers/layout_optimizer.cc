@@ -72,26 +72,37 @@ std::set<string> GetOpsFormatSupported() {
 // TODO(yaozhang): enable SumProcessor with auto-tuning. Currently disabled
 // because of the worse performance in some cases.
 std::set<string> GetOpsFormatAgnostic() {
-  std::set<string> ops_format_agnostic = {"Add",
+  std::set<string> ops_format_agnostic = {"Abs",
+                                          "Add",
                                           "AddN",
                                           "Acos",
                                           "Acosh",
+                                          "Angle",
                                           "Asin",
                                           "Asinh",
                                           "Atan",
                                           "Atanh",
+                                          "Bitcast",
+                                          "Cast",
                                           "Ceil",
+                                          "CheckNumerics",
                                           "Cos",
                                           "Cosh",
+                                          "ComplexAbs",
                                           "Concat",
                                           "ConcatV2",
+                                          "Conj",
                                           "Digamma",
+                                          "Elu",
+                                          "EluGrad",
                                           "Erf",
                                           "Erfc",
                                           "Exp",
                                           "Expm1",
                                           "Floor",
+                                          "GuaranteeConst",
                                           "Identity",
+                                          "Imag",
                                           "Inv",
                                           "InvGrad",
                                           "IsFinite",
@@ -100,16 +111,23 @@ std::set<string> GetOpsFormatAgnostic() {
                                           "Lgamma",
                                           "Log",
                                           "Log1p",
+                                          "Merge",
                                           "Mul",
                                           "Neg",
+                                          "OnesLike",
                                           "Pad",
+                                          "PreventGradient",
+                                          "Real",
                                           "RealDiv",
                                           "Reciprocal",
                                           "ReciprocalGrad",
                                           "Relu",
                                           "Relu6",
+                                          "Relu6Grad",
                                           "ReluGrad",
                                           "Rint",
+                                          "Selu",
+                                          "SeluGrad",
                                           "Shape",
                                           "ShapeN",
                                           "Sigmoid",
@@ -118,7 +136,14 @@ std::set<string> GetOpsFormatAgnostic() {
                                           "Sin",
                                           "Sinh",
                                           "Slice",
+                                          "Snapshot",
+                                          "Softplus",
+                                          "SoftplusGrad",
                                           "Split",
+                                          "Switch",
+                                          "RefIdentity",
+                                          "RefMerge",
+                                          "RefSwitch",
                                           "Round",
                                           "Rsqrt",
                                           "RsqrtGrad",
@@ -127,10 +152,12 @@ std::set<string> GetOpsFormatAgnostic() {
                                           "Square",
                                           "SquaredDifference",
                                           "Squeeze",
+                                          "StopGradient",
                                           /*"Sum",*/ "Sub",
                                           "Tan",
                                           "Tanh",
-                                          "TanhGrad"};
+                                          "TanhGrad",
+                                          "ZerosLike"};
   return ops_format_agnostic;
 }
 
@@ -174,6 +201,15 @@ bool IsConcatV1(const NodeDef& node) {
 bool IsMaxPoolGradV1(const NodeDef& node) {
   const auto& op = node.op();
   return op == "MaxPoolGrad";
+}
+
+bool IsUnaryGrad(const NodeDef& node) {
+  bool is_unary_grad =
+      IsEluGrad(node) || IsInvGrad(node) || IsReciprocalGrad(node) ||
+      IsRelu6Grad(node) || IsReluGrad(node) || IsRsqrtGrad(node) ||
+      IsSeluGrad(node) || IsSigmoidGrad(node) || IsSoftplusGrad(node) ||
+      IsSoftsignGrad(node) || IsSqrtGrad(node) || IsTanhGrad(node);
+  return is_unary_grad;
 }
 
 class GraphProcessor {
@@ -286,23 +322,31 @@ class NodeProcessor : public GraphProcessor {
  protected:
   bool IsPortDimsN(const NodeDef& node, int port, int n) const {
     if (node.attr().find("_output_shapes") != node.attr().end()) {
-      auto shape = node.attr().at("_output_shapes").list().shape(port);
-      if (shape.unknown_rank()) {
-        return false;
-      }
-      if (shape.dim_size() == n) {
-        return true;
+      if (node.attr().at("_output_shapes").list().shape_size() > port) {
+        auto shape = node.attr().at("_output_shapes").list().shape(port);
+        if (shape.unknown_rank()) {
+          return false;
+        }
+        if (shape.dim_size() == n) {
+          return true;
+        }
       }
     }
     return false;
   }
 
-  bool IsDimsN(const NodeDef& node, int n) const {
+  bool IsPortZeroDimsN(const NodeDef& node, int n) const {
     return IsPortDimsN(node, 0, n);
   }
 
-  bool IsDimsFour(const NodeDef& node) const {
-    return NodeProcessor::IsDimsN(node, 4) || IsNodeNCHWToNHWC(node.name());
+  bool IsPortZeroDimsFour(const NodeDef& node) const {
+    return NodeProcessor::IsPortZeroDimsN(node, 4) ||
+           IsNodeNCHWToNHWC(node.name());
+  }
+
+  bool IsPortDimsFour(const NodeDef& node, int port) const {
+    return NodeProcessor::IsPortDimsN(node, port, 4) ||
+           IsNodeNCHWToNHWC(node.name());
   }
 
   bool IsNHWC() const {
@@ -332,8 +376,8 @@ class NodeProcessor : public GraphProcessor {
   }
 
   virtual bool ShouldProcess() const {
-    return !MustPreserve() && IsNHWC() && IsDimsFour(*node_) && HasOutputs() &&
-           IsOnGPU();
+    return !MustPreserve() && IsNHWC() && IsPortZeroDimsFour(*node_) &&
+           HasOutputs() && IsOnGPU();
   }
 
   virtual bool IsOnGPU() const {
@@ -558,11 +602,21 @@ class NodeProcessor : public GraphProcessor {
             if (op == "Transpose") {
               added_node_name = AddPrefixToNodeName(added_node_base_name,
                                                     kTransposeNCHWToNHWC, "-");
-              TF_RETURN_IF_ERROR(HasAttribute(*node_, "T"));
+              DataType dtype;
+              if (op == "Imag" || op == "Real" || op == "Angle" ||
+                  op == "Conj" || op == "ComplexAbs") {
+                TF_RETURN_IF_ERROR(HasAttribute(*node_, "Tout"));
+                dtype = node_->attr().at("Tout").type();
+              } else if (op == "Bitcast") {
+                TF_RETURN_IF_ERROR(HasAttribute(*node_, "type"));
+                dtype = node_->attr().at("type").type();
+              } else {
+                TF_RETURN_IF_ERROR(HasAttribute(*node_, "T"));
+                dtype = node_->attr().at("T").type();
+              }
               TF_RETURN_IF_ERROR(HasAttribute(*node_, "_output_shapes"));
               AddNodeTranspose(
-                  added_node_name, input, const_name,
-                  node_->attr().at("T").type(),
+                  added_node_name, input, const_name, dtype,
                   node_->attr().at("_output_shapes").list().shape(0), false);
             } else if (op == "DataFormatVecPermute") {
               added_node_name = AddPrefixToNodeName(added_node_base_name,
@@ -726,7 +780,9 @@ class BiasAddGradProcessor : public NodeProcessor {
     }
     auto input = node_map_->GetNode(node_->input(0));
     if (input) {
-      if (IsNHWC() && IsDimsFour(*input)) {
+      int port;
+      ParseNodeName(node_->input(0), &port);
+      if (IsNHWC() && IsPortDimsFour(*input, port)) {
         return true;
       }
     }
@@ -743,8 +799,8 @@ class Conv2DProcessor : public NodeProcessor {
 
  protected:
   bool ShouldProcess() const override {
-    return !MustPreserve() && IsNHWC() && IsDimsFour(*node_) && HasOutputs() &&
-           (!IsGemmUsed() || no_gemm_) && IsOnGPU();
+    return !MustPreserve() && IsNHWC() && IsPortZeroDimsFour(*node_) &&
+           HasOutputs() && (!IsGemmUsed() || no_gemm_) && IsOnGPU();
   }
 
   TensorShapeProto GetShape(const string& input_name) const {
@@ -902,7 +958,7 @@ class AgnosticNodeProcessor : public NodeProcessor {
 
  protected:
   bool ShouldProcess() const override {
-    return !MustPreserve() && IsDimsFour(*node_) && HasOutputs() &&
+    return !MustPreserve() && IsPortZeroDimsFour(*node_) && HasOutputs() &&
            IsNodeAfterNCHWToNHWC() && IsOnGPU();
   }
 
@@ -987,7 +1043,7 @@ class BinaryOpProcessor : public AgnosticNodeProcessor {
 
  protected:
   bool ShouldProcess() const override {
-    return !MustPreserve() && IsDimsFour(*node_) && HasOutputs() &&
+    return !MustPreserve() && IsPortZeroDimsFour(*node_) && HasOutputs() &&
            IsNodeAfterNCHWToNHWC() &&
            (IsNDOperateWithMD(4, 0) || IsNDOperateWithMD(4, 1) ||
             IsNDOperateWithMD(4, 4) || IsNDOperateWithMD(0, 4) ||
@@ -999,10 +1055,14 @@ class BinaryOpProcessor : public AgnosticNodeProcessor {
     std::vector<int> input_pos;
     auto input0 = node_map_->GetNode(node_->input(0));
     auto input1 = node_map_->GetNode(node_->input(1));
-    if (IsDimsFour(*input0)) {
+    int input0_port;
+    ParseNodeName(node_->input(0), &input0_port);
+    int input1_port;
+    ParseNodeName(node_->input(1), &input1_port);
+    if (IsPortDimsFour(*input0, input0_port)) {
       input_pos.push_back(0);
     }
-    if (IsDimsFour(*input1)) {
+    if (IsPortDimsFour(*input1, input1_port)) {
       input_pos.push_back(1);
     }
     return input_pos;
@@ -1011,9 +1071,16 @@ class BinaryOpProcessor : public AgnosticNodeProcessor {
   bool IsNDOperateWithMD(int n, int m) const {
     auto input0 = node_map_->GetNode(node_->input(0));
     auto input1 = node_map_->GetNode(node_->input(1));
+    int input0_port;
+    ParseNodeName(node_->input(0), &input0_port);
+    int input1_port;
+    ParseNodeName(node_->input(1), &input1_port);
+
     if (input0 && input1) {
-      bool input0_is_n = (n == 4) ? IsDimsFour(*input0) : IsDimsN(*input0, n);
-      bool input1_is_m = (m == 4) ? IsDimsFour(*input1) : IsDimsN(*input1, m);
+      bool input0_is_n = (n == 4) ? IsPortDimsFour(*input0, input0_port)
+                                  : IsPortDimsN(*input0, input0_port, n);
+      bool input1_is_m = (m == 4) ? IsPortDimsFour(*input1, input1_port)
+                                  : IsPortDimsN(*input1, input1_port, m);
       return input0_is_n && input1_is_m;
     }
     return false;
@@ -1082,8 +1149,14 @@ class BinaryOpProcessor : public AgnosticNodeProcessor {
           AddPrefixToNodeName(base_name, kReshapeConst, "-");
       auto input_node = node_map_->GetNode(node_->input(vector_index));
       TF_RETURN_IF_ERROR(HasAttribute(*input_node, "_output_shapes"));
-      int vector_size =
-          input_node->attr().at("_output_shapes").list().shape(0).dim(0).size();
+      int port;
+      ParseNodeName(node_->input(vector_index), &port);
+      int vector_size = input_node->attr()
+                            .at("_output_shapes")
+                            .list()
+                            .shape(port)
+                            .dim(0)
+                            .size();
       AddNodeShapeConst(shape_const_node_name, vector_size,
                         NodeName(node_->input(vector_index)));
       TF_RETURN_IF_ERROR(HasAttribute(*node_, "T"));
@@ -1134,34 +1207,55 @@ class ConcatProcessor : public AgnosticNodeProcessor {
   int axis_node_pos_;
 };
 
+class MergeProcessor : public AgnosticNodeProcessor {
+ public:
+  explicit MergeProcessor(const OptimizeContext& opt_cxt)
+      : AgnosticNodeProcessor(opt_cxt) {}
+
+ protected:
+  bool ShouldProcess() const override {
+    return !MustPreserve() && IsPortZeroDimsFour(*node_) && HasOutputs() &&
+           IsEveryInputAfterNCHWToNHWC() && IsOnGPU();
+  }
+
+  std::vector<int> GetInputPos() const override {
+    std::vector<int> input_pos;
+    input_pos.reserve(node_->input_size());
+    for (int i = 0; i < node_->input_size(); i++) {
+      input_pos.push_back(i);
+    }
+    return input_pos;
+  }
+
+ private:
+  bool IsEveryInputAfterNCHWToNHWC() const {
+    for (const auto& input : node_->input()) {
+      auto input_node = node_map_->GetNode(input);
+      if (IsNodeAfterNCHWToNHWC(*input_node) ||
+          IsNodeNCHWToNHWC(input_node->name())) {
+        continue;
+      }
+      return false;
+    }
+    return true;
+  }
+};
+
 class PadProcessor : public AgnosticNodeProcessor {
  public:
   explicit PadProcessor(const OptimizeContext& opt_cxt)
       : AgnosticNodeProcessor(opt_cxt) {}
 
  protected:
-  bool ShouldProcess() const override {
-    return !MustPreserve() && IsDimsFour(*node_) && HasOutputs() &&
-           IsNodeAfterNCHWToNHWC() && PaddingSupported() && IsOnGPU();
-  }
-  Status CustomizedProcessing() override { return UpdateAttrValueOfInput(1); }
-
- private:
-  bool PaddingSupported() const {
-    auto pad_const = node_map_->GetNode(node_->input(1));
-    bool is_const = IsConstant(*pad_const);
-    bool is_4D = false;
-    if (HasAttribute(*pad_const, "value").ok()) {
-      Tensor tensor;
-      if (tensor.FromProto(pad_const->mutable_attr()->at({"value"}).tensor())) {
-        if (tensor.dims() == 2) {
-          if (tensor.dim_size(0) == 4 && tensor.dim_size(1) == 2) {
-            is_4D = true;
-          }
-        }
-      }
+  Status CustomizedProcessing() override {
+    auto index_node = node_map_->GetNode(node_->input(1));
+    if (IsConstant(*index_node)) {
+      TF_RETURN_IF_ERROR(UpdateAttrValueOfInput(1));
+    } else {
+      DataType dtype = node_->attr().at("Tpaddings").type();
+      AddDataFormatTranformToInput("DataFormatVecPermute", 1, dtype);
     }
-    return is_const && is_4D;
+    return Status::OK();
   }
 };
 
@@ -1189,9 +1283,9 @@ class SplitProcessor : public ConcatProcessor {
   }
 };
 
-class ReluGradProcessor : public AgnosticNodeProcessor {
+class UnaryGradProcessor : public AgnosticNodeProcessor {
  public:
-  explicit ReluGradProcessor(const OptimizeContext& opt_cxt)
+  explicit UnaryGradProcessor(const OptimizeContext& opt_cxt)
       : AgnosticNodeProcessor(opt_cxt) {}
 
  protected:
@@ -1216,7 +1310,9 @@ class ShapeProcessor : public AgnosticNodeProcessor {
     std::vector<int> input_pos;
     for (int i = 0; i < node_->input_size(); i++) {
       auto input = node_map_->GetNode(node_->input(i));
-      if (IsDimsFour(*input) &&
+      int port;
+      ParseNodeName(node_->input(i), &port);
+      if (IsPortDimsFour(*input, port) &&
           (IsNodeAfterNCHWToNHWC(*input) || IsNodeNCHWToNHWC(input->name()))) {
         input_pos.push_back(i);
       }
@@ -1267,7 +1363,7 @@ class SqueezeProcessor : public AgnosticNodeProcessor {
 
  protected:
   bool ShouldProcess() const override {
-    return !MustPreserve() && IsDimsN(*node_, 2) && HasOutputs() &&
+    return !MustPreserve() && IsPortZeroDimsN(*node_, 2) && HasOutputs() &&
            IsNodeAfterNCHWToNHWC() && IsInputConvertible() && IsAlongDimHW() &&
            IsOnGPU();
   }
@@ -1318,8 +1414,10 @@ class SumProcessor : public AgnosticNodeProcessor {
  protected:
   bool ShouldProcess() const override {
     auto input0 = node_map_->GetNode(node_->input(0));
+    int port;
+    ParseNodeName(node_->input(0), &port);
     return !MustPreserve() && HasOutputs() && IsNodeAfterNCHWToNHWC() &&
-           IsDimsFour(*input0) && IsAlongDimNHW() && IsOnGPU();
+           IsPortDimsFour(*input0, port) && IsAlongDimNHW() && IsOnGPU();
   }
 
   Status AddLayoutTransposeToOutputs() override { return Status::OK(); }
@@ -1352,6 +1450,15 @@ class SumProcessor : public AgnosticNodeProcessor {
     }
     return false;
   }
+};
+
+class SwitchProcessor : public AgnosticNodeProcessor {
+ public:
+  explicit SwitchProcessor(const OptimizeContext& opt_cxt)
+      : AgnosticNodeProcessor(opt_cxt) {}
+
+ protected:
+  std::set<int> GetOutputPos() const override { return {0, 1}; }
 };
 
 class DataLayoutOptimizer : GraphProcessor {
@@ -1455,10 +1562,10 @@ class DataLayoutOptimizer : GraphProcessor {
             node_processor.reset(new BinaryOpProcessor(opt_cxt));
           } else if (IsConcat(*node)) {
             node_processor.reset(new ConcatProcessor(opt_cxt));
+          } else if (IsMerge(*node)) {
+            node_processor.reset(new MergeProcessor(opt_cxt));
           } else if (IsPad(*node)) {
             node_processor.reset(new PadProcessor(opt_cxt));
-          } else if (IsReluGrad(*node)) {
-            node_processor.reset(new ReluGradProcessor(opt_cxt));
           } else if (IsSlice(*node)) {
             node_processor.reset(new SliceProcessor(opt_cxt));
           } else if (IsShape(*node) || IsShapeN(*node)) {
@@ -1469,6 +1576,10 @@ class DataLayoutOptimizer : GraphProcessor {
             node_processor.reset(new SqueezeProcessor(opt_cxt));
           } else if (IsSum(*node)) {
             node_processor.reset(new SumProcessor(opt_cxt));
+          } else if (IsSwitch(*node)) {
+            node_processor.reset(new SwitchProcessor(opt_cxt));
+          } else if (IsUnaryGrad(*node)) {
+            node_processor.reset(new UnaryGradProcessor(opt_cxt));
           } else {
             node_processor.reset(new AgnosticNodeProcessor(opt_cxt));
           }
