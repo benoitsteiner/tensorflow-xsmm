@@ -784,7 +784,7 @@ string HloDotDumper::GetInstructionNodeInlinedOperands(
 
     // Otherwise, print e.g. "%constant.42 (s32[100])".
     string constant_name;
-    if (tensorflow::StringPiece(constant->name()).starts_with("%constant")) {
+    if (tensorflow::StringPiece(constant->name()).starts_with("constant")) {
       constant_name = constant->name();
     } else {
       constant_name = StrCat("constant ", constant->name());
@@ -1000,7 +1000,7 @@ string HloDotDumper::GetInstructionNodeLabel(const HloInstruction* instr) {
   // The HLO instruction name contains usually the opcode, e.g. "%add.42" is
   // an add instruction.  In this case we render just the name.
   if (tensorflow::StringPiece(instr->name())
-          .starts_with(StrCat("%", HloOpcodeString(instr->opcode())))) {
+          .starts_with(HloOpcodeString(instr->opcode()))) {
     return Printf("<b>%s</b>", HtmlLikeStringSanitize(instr->name()));
   }
   string extended_opcode =
@@ -1354,18 +1354,17 @@ string SaveGraph(const string& graph,
       break;
   }
   string path = JoinPath(
-      dest_path, StrCat("hlo_graph_", output_num++, ".XXXXXX", file_extension));
+      dest_path, StrCat("hlo_graph_", output_num++, "."));
   auto status = Status::OK();
-  int fd = mkstemps(&path[0], file_extension.length());
-  if (fd < 0) {
+  auto env = tensorflow::Env::Default();
+  if (!env->CreateUniqueFileName(&path, file_extension)) {
     status =
         Status(tensorflow::error::Code::UNKNOWN,
                StrCat("Failed to create temporary file to dump HLO graph: ",
                       strerror(errno)));
   } else {
     status =
-        tensorflow::WriteStringToFile(tensorflow::Env::Default(), path, graph);
-    close(fd);
+        tensorflow::WriteStringToFile(env, path, graph);
   }
   if (!status.ok()) {
     LOG(WARNING) << "Saving HLO graph failed: " << status;

@@ -313,6 +313,8 @@ REGISTER_OP("ParallelInterleaveDataset")
     .Input("cycle_length: int64")
     .Input("block_length: int64")
     .Input("sloppy: bool")
+    .Input("buffer_output_elements: int64")
+    .Input("prefetch_input_elements: int64")
     .Output("handle: variant")
     .Attr("f: func")
     .Attr("Targuments: list(type) >= 0")
@@ -556,6 +558,16 @@ will the returned when used.
 
 filename: A path on the filesystem where we should cache the dataset. Note: this
   will be a directory.
+)doc");
+
+REGISTER_OP("UniqueDataset")
+    .Input("input_dataset: variant")
+    .Output("handle: variant")
+    .Attr("output_types: list(type) >= 1")
+    .Attr("output_shapes: list(shape) >= 1")
+    .SetShapeFn(shape_inference::ScalarShape)
+    .Doc(R"doc(
+Creates a dataset that contains the unique elements of `input_dataset`.
 )doc");
 
 REGISTER_OP("TextLineDataset")
