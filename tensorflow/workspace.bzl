@@ -45,7 +45,7 @@ def _parse_bazel_version(bazel_version):
   version = _extract_version_number(bazel_version)
   return tuple([int(n) for n in version.split(".")])
 
-def _check_bazel_version_at_least(minimum_bazel_version):
+def check_bazel_version_at_least(minimum_bazel_version):
   if "bazel_version" not in dir(native):
     fail("\nCurrent Bazel version is lower than 0.2.1, expected at least %s\n" % minimum_bazel_version)
   elif not native.bazel_version:
@@ -64,7 +64,7 @@ def tf_workspace(path_prefix="", tf_repo_name=""):
   # We must check the bazel version before trying to parse any other BUILD
   # files, in case the parsing of those build files depends on the bazel
   # version we require here.
-  _check_bazel_version_at_least("0.5.4")
+  check_bazel_version_at_least("0.5.4")
   cuda_configure(name="local_config_cuda")
   git_configure(name="local_config_git")
   sycl_configure(name="local_config_sycl")
@@ -473,11 +473,11 @@ def tf_workspace(path_prefix="", tf_repo_name=""):
   tf_http_archive(
       name = "llvm",
       urls = [
-          "https://mirror.bazel.build/github.com/llvm-mirror/llvm/archive/fb421b00e678c509c2595248ddc2d2bb2437f181.tar.gz",
-          "https://github.com/llvm-mirror/llvm/archive/fb421b00e678c509c2595248ddc2d2bb2437f181.tar.gz",
+          "https://mirror.bazel.build/github.com/llvm-mirror/llvm/archive/f78b1b74e8a1c265f84ccd2142af88e346ce721e.tar.gz",
+          "https://github.com/llvm-mirror/llvm/archive/f78b1b74e8a1c265f84ccd2142af88e346ce721e.tar.gz",
       ],
-      sha256 = "de164cb1090907dd5ccda0e270f5e5457f5280d552eb360f8deffcb11b16df96",
-      strip_prefix = "llvm-fb421b00e678c509c2595248ddc2d2bb2437f181",
+      sha256 = "d8e5966cf8e7489fa5a1b167f83bebaabe58aa7584b6d8a5c8f3722ae3047d19",
+      strip_prefix = "llvm-f78b1b74e8a1c265f84ccd2142af88e346ce721e",
       build_file = str(Label("//third_party/llvm:llvm.BUILD")),
   )
 

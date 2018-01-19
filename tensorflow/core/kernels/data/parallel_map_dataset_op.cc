@@ -58,9 +58,8 @@ class ParallelMapDatasetOp : public UnaryDatasetOpKernel {
                     "num_parallel_calls must be greater than zero."));
 
     std::unique_ptr<CapturedFunction> captured_func;
-    OP_REQUIRES_OK(ctx, CapturedFunction::Create(ctx, func_, graph_def_version_,
-                                                 std::move(other_arguments),
-                                                 &captured_func));
+    OP_REQUIRES_OK(ctx, CapturedFunction::Create(
+                            func_, std::move(other_arguments), &captured_func));
 
     *output = new Dataset(ctx, input, func_, num_parallel_calls, output_types_,
                           output_shapes_, std::move(captured_func));
@@ -327,22 +326,9 @@ class ParallelMapDatasetOp : public UnaryDatasetOpKernel {
           // `result->return_values`, and notify `result->notification`
           // to unblock a consumer.
           result->notification.reset(new Notification);
-
-          FunctionLibraryRuntime::Options opts;
-          opts.step_id = CapturedFunction::generate_step_id();
-          ScopedStepContainer* step_container =
-              new ScopedStepContainer(opts.step_id, [this](const string& name) {
-                dataset()
-                    ->captured_func_->resource_manager()
-                    ->Cleanup(name)
-                    .IgnoreError();
-              });
-          opts.step_container = step_container;
-          opts.runner = ctx->runner();
           dataset()->captured_func_->RunAsync(
-              opts, std::move(input_element), &result->return_values,
-              [result, step_container, result_index](Status ret_status) {
-                delete step_container;
+              ctx, std::move(input_element), &result->return_values,
+              [result, result_index](Status ret_status) {
                 result->status.Update(ret_status);
                 result->notification->Notify();
               });
