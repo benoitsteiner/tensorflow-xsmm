@@ -93,3 +93,33 @@ filegroup(
     ),
     visibility = ["//tensorflow:__subpackages__"],
 )
+
+cc_library(
+    name = "verifier",
+    srcs = ["verifier.cc"],
+    hdrs = ["verifier.h"],
+    deps = [
+        "//tensorflow/contrib/lite:framework",
+        "//tensorflow/contrib/lite:schema_fbs_version",
+        "//tensorflow/contrib/lite:string_util",
+        "//tensorflow/contrib/lite/schema:schema_fbs",
+        "@com_google_absl//absl/base:core_headers",
+    ],
+)
+
+cc_test(
+    name = "verifier_test",
+    size = "small",
+    srcs = ["verifier_test.cc"],
+    deps = [
+        ":verifier",
+        "//tensorflow/contrib/lite:framework",
+        "//tensorflow/contrib/lite:schema_fbs_version",
+        "//tensorflow/contrib/lite:string_util",
+        "//tensorflow/contrib/lite/schema:schema_fbs",
+        "//tensorflow/contrib/lite/testing:util",
+        "//tensorflow/core:framework_lite",
+        "@com_google_googletest//:gtest",
+        "@flatbuffers",
+    ],
+)

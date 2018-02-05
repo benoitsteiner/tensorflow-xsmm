@@ -770,8 +770,9 @@ def resize_images(images,
     size: A 1-D int32 Tensor of 2 elements: `new_height, new_width`.  The
           new size for the images.
     method: ResizeMethod.  Defaults to `ResizeMethod.BILINEAR`.
-    align_corners: bool. If true, exactly align all 4 corners of the input and
-                   output. Defaults to `false`.
+    align_corners: bool.  If True, the centers of the 4 corner pixels of the
+        input and output tensors are aligned, preserving the values at the
+        corner pixels. Defaults to `False`.
 
   Raises:
     ValueError: if the shape of `images` is incompatible with the
@@ -1690,7 +1691,8 @@ def rgb_to_yiq(images):
     images: tensor with the same shape as `images`.
   """
   images = ops.convert_to_tensor(images, name='images')
-  kernel = ops.convert_to_tensor(_rgb_to_yiq_kernel, dtype=images.dtype, name='kernel')
+  kernel = ops.convert_to_tensor(
+      _rgb_to_yiq_kernel, dtype=images.dtype, name='kernel')
   ndims = images.get_shape().ndims
   return math_ops.tensordot(images, kernel, axes=[[ndims-1], [0]])
 
@@ -1716,7 +1718,8 @@ def yiq_to_rgb(images):
     images: tensor with the same shape as `images`.
   """
   images = ops.convert_to_tensor(images, name='images')
-  kernel = ops.convert_to_tensor(_yiq_to_rgb_kernel, dtype=images.dtype, name='kernel')
+  kernel = ops.convert_to_tensor(
+      _yiq_to_rgb_kernel, dtype=images.dtype, name='kernel')
   ndims = images.get_shape().ndims
   return math_ops.tensordot(images, kernel, axes=[[ndims-1], [0]])
 
@@ -1741,7 +1744,8 @@ def rgb_to_yuv(images):
     images: tensor with the same shape as `images`.
   """
   images = ops.convert_to_tensor(images, name='images')
-  kernel = ops.convert_to_tensor(_rgb_to_yuv_kernel, dtype=images.dtype, name='kernel')
+  kernel = ops.convert_to_tensor(
+      _rgb_to_yuv_kernel, dtype=images.dtype, name='kernel')
   ndims = images.get_shape().ndims
   return math_ops.tensordot(images, kernel, axes=[[ndims-1], [0]])
 
@@ -1767,7 +1771,8 @@ def yuv_to_rgb(images):
     images: tensor with the same shape as `images`.
   """
   images = ops.convert_to_tensor(images, name='images')
-  kernel = ops.convert_to_tensor(_yuv_to_rgb_kernel, dtype=images.dtype, name='kernel')
+  kernel = ops.convert_to_tensor(
+      _yuv_to_rgb_kernel, dtype=images.dtype, name='kernel')
   ndims = images.get_shape().ndims
   return math_ops.tensordot(images, kernel, axes=[[ndims-1], [0]])
 

@@ -171,11 +171,11 @@ def _rnn_step(
   return (final_output, final_state)
 
   Args:
-    time: Python int, the current time step
-    sequence_length: int32 `Tensor` vector of size [batch_size]
-    min_sequence_length: int32 `Tensor` scalar, min of sequence_length
-    max_sequence_length: int32 `Tensor` scalar, max of sequence_length
-    zero_output: `Tensor` vector of shape [output_size]
+    time: int32 `Tensor` scalar.
+    sequence_length: int32 `Tensor` vector of size [batch_size].
+    min_sequence_length: int32 `Tensor` scalar, min of sequence_length.
+    max_sequence_length: int32 `Tensor` scalar, max of sequence_length.
+    zero_output: `Tensor` vector of shape [output_size].
     state: Either a single `Tensor` matrix of shape `[batch_size, state_size]`,
       or a list/tuple of such tensors.
     call_cell: lambda returning tuple of (new_output, new_state) where
@@ -202,6 +202,9 @@ def _rnn_step(
   flat_state = nest.flatten(state)
   flat_zero_output = nest.flatten(zero_output)
 
+  # Vector describing which batch entries are finished.
+  copy_cond = time >= sequence_length
+
   def _copy_one_through(output, new_output):
     # TensorArray and scalar get passed through.
     if isinstance(output, tensor_array_ops.TensorArray):
@@ -209,7 +212,6 @@ def _rnn_step(
     if output.shape.ndims == 0:
       return new_output
     # Otherwise propagate the old or the new value.
-    copy_cond = (time >= sequence_length)
     with ops.colocate_with(new_output):
       return array_ops.where(copy_cond, output, new_output)
 
@@ -812,7 +814,10 @@ def _dynamic_rnn_loop(cell,
     return (time + 1, output_ta_t, new_state)
 
   if in_graph_mode:
-    loop_bound = max_sequence_length
+    # Make sure that we run at least 1 step, if necessary, to ensure
+    # the TensorArrays pick up the dynamic shape.
+    loop_bound = math_ops.minimum(
+        time_steps, math_ops.maximum(1, max_sequence_length))
   else:
     # Using max_sequence_length isn't currently supported in the Eager branch.
     loop_bound = time_steps
@@ -1122,6 +1127,12 @@ def raw_rnn(cell, loop_fn,
       def _copy_some_through(current, candidate):
         """Copy some tensors through via array_ops.where."""
         def copy_fn(cur_i, cand_i):
+          # TensorArray and scalar get passed through.
+          if isinstance(cur_i, tensor_array_ops.TensorArray):
+            return cand_i
+          if cur_i.shape.ndims == 0:
+            return cand_i
+          # Otherwise propagate the old or the new value.
           with ops.colocate_with(cand_i):
             return array_ops.where(elements_finished, cur_i, cand_i)
         return nest.map_structure(copy_fn, current, candidate)
