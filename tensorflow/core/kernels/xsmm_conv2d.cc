@@ -136,7 +136,7 @@ struct libxsmm_dnn_registry_value {
   libxsmm_dnn_layer* handle;
 };
 
-typedef libxsmm_tf_allocator<libxsmm_scratch_allocator> libxsmm_tf_scratch_allocator
+typedef libxsmm_tf_allocator<libxsmm_scratch_allocator> libxsmm_tf_scratch_allocator;
 
 static class libxsmm_dnn_registry_type {
 private:
