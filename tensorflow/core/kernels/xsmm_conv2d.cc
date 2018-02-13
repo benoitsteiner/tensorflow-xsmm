@@ -136,6 +136,8 @@ struct libxsmm_dnn_registry_value {
   libxsmm_dnn_layer* handle;
 };
 
+typedef libxsmm_tf_allocator<libxsmm_scratch_allocator> libxsmm_tf_scratch_allocator
+
 static class libxsmm_dnn_registry_type {
 private:
   typedef std::unordered_map<
@@ -146,6 +148,13 @@ private:
 
 public:
   libxsmm_dnn_registry_type() {
+#if !defined(LIBXSMM_LOCAL_ALLOC)
+    libxsmm_malloc_function malloc_fn;
+    libxsmm_free_function free_fn;
+    malloc_fn.function = libxsmm_tf_scratch_allocator::malloc;
+    free_fn.function = libxsmm_tf_scratch_allocator::free;
+    libxsmm_set_scratch_allocator(0/*context*/, malloc_fn, free_fn);
+#endif
     libxsmm_init();
     LIBXSMM_LOCK_ATTR_INIT(LIBXSMM_LOCK_RWLOCK, &attr);
     LIBXSMM_LOCK_INIT(LIBXSMM_LOCK_RWLOCK, &lock, &attr);
@@ -229,8 +238,10 @@ static bool CallLibxsmmConvGeneric(OpKernelContext* ctx,
                       l_tick6, l_tick7, l_tick8, l_tick9, l_tick10;
   l_tick1 = libxsmm_timer_tick();
 #endif
-  // setup scoped allocator, which adopts the allocator from the context
-  const libxsmm_tf_allocator<libxsmm_scratch_allocator> tf_allocator(*ctx);
+#if defined(LIBXSMM_LOCAL_ALLOC)
+  // setup scoped allocator, which adopts the allocator of the current context
+  const libxsmm_tf_scratch_allocator tf_allocator(*ctx);
+#endif
   const libxsmm_dnn_registry_key regkey(desc);
   const libxsmm_dnn_registry_value regentry = libxsmm_dnn_registry.find(regkey);
   libxsmm_dnn_tensor *libxsmm_input, *libxsmm_output, *libxsmm_filter;
