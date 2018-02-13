@@ -148,14 +148,14 @@ private:
 
 public:
   libxsmm_dnn_registry_type() {
+    libxsmm_init(); /* must be first */
 #if !defined(LIBXSMM_LOCAL_ALLOC)
-    libxsmm_malloc_function malloc_fn;
-    libxsmm_free_function free_fn;
-    malloc_fn.function = libxsmm_tf_scratch_allocator::malloc;
-    free_fn.function = libxsmm_tf_scratch_allocator::free;
-    libxsmm_set_scratch_allocator(0/*context*/, malloc_fn, free_fn);
+    { libxsmm_malloc_function malloc_fn; libxsmm_free_function free_fn;
+      malloc_fn.function = libxsmm_tf_scratch_allocator::malloc;
+      free_fn.function = libxsmm_tf_scratch_allocator::free;
+      libxsmm_set_scratch_allocator(0/*context*/, malloc_fn, free_fn);
+    }
 #endif
-    libxsmm_init();
     LIBXSMM_LOCK_ATTR_INIT(LIBXSMM_LOCK_RWLOCK, &attr);
     LIBXSMM_LOCK_INIT(LIBXSMM_LOCK_RWLOCK, &lock, &attr);
   }
