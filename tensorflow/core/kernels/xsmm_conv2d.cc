@@ -27,8 +27,8 @@ void dummy_xsmm_conv2d_ensure_file_is_not_empty();
 
 #include <stdlib.h>
 #include <cstring>
-#if 0
-#include <omp.h>
+#if defined(_OPENMP) && defined(LIBXSMM_USE_OPENMP)
+# include <omp.h>
 #endif
 
 #include "tensorflow/core/framework/op_kernel.h"
@@ -397,7 +397,7 @@ static bool CallLibxsmmConvGeneric(OpKernelContext* ctx,
   l_tick6 = libxsmm_timer_tick();
 #endif
 
-#if 1
+#if !defined(_OPENMP) || !defined(LIBXSMM_USE_OPENMP)
   BlockingCounter counter(num_threads);
 
   for (int i = 0; i < num_threads; ++i) {
