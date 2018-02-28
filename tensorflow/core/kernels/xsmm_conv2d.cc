@@ -37,7 +37,7 @@ void dummy_xsmm_conv2d_ensure_file_is_not_empty();
 
 #include "include/libxsmm_cpuid.h"
 #include "include/libxsmm_malloc.h"
-#include "third_party/libxsmm/src/libxsmm_main.h"  // TODO(bsteiner): API to avoid incl. header from src/
+#include "src/libxsmm_main.h"  // TODO(bsteiner): API to avoid incl. header from src/
 
 #define CHECK_LIBXSMM(CONDITION_OK, MESSAGE) if (!(CONDITION_OK)) VLOG(0) << (MESSAGE)
 #define CHECK_LIBXSMM_DNN(STATUS, MESSAGE) CHECK_LIBXSMM(LIBXSMM_DNN_SUCCESS == (STATUS), MESSAGE) \
