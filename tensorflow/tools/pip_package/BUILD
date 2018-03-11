@@ -138,7 +138,7 @@ filegroup(
         "@jemalloc//:COPYING",
         "@jpeg//:LICENSE.md",
         "@kafka//:LICENSE",
-        "@libxsmm_archive//:LICENSE",
+        "@libxsmm_archive//:LICENSE.md",
         "@lmdb//:LICENSE",
         "@local_config_sycl//sycl:LICENSE.text",
         "@grpc//third_party/nanopb:LICENSE.txt",
