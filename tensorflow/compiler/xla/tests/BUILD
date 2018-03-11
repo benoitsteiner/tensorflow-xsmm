@@ -44,6 +44,7 @@ cc_library(
         "//tensorflow/core:lib",
         "//tensorflow/core:test",
     ],
+    alwayslink = True,
 )
 
 cc_library(
@@ -138,6 +139,7 @@ cc_library(
         "//tensorflow/compiler/xla:status_macros",
         "//tensorflow/compiler/xla/service:hlo",
         "//tensorflow/compiler/xla/service:hlo_verifier",
+        "//tensorflow/compiler/xla/tools/parser:hlo_parser",
         "//tensorflow/core:lib",
         "//tensorflow/core:test",
     ],
@@ -334,6 +336,9 @@ xla_test(
 xla_test(
     name = "while_test",
     srcs = ["while_test.cc"],
+    tags = [
+        "enable_for_xla_interpreter",
+    ],
     deps = [
         "//tensorflow/compiler/xla:literal_util",
         "//tensorflow/compiler/xla:shape_util",
@@ -944,6 +949,9 @@ xla_test(
     name = "dynamic_ops_test",
     timeout = "moderate",
     srcs = ["dynamic_ops_test.cc"],
+    tags = [
+        "enable_for_xla_interpreter",
+    ],
     deps = [
         "//tensorflow/compiler/xla:array2d",
         "//tensorflow/compiler/xla:reference_util",
@@ -1296,6 +1304,7 @@ xla_test(
         "//tensorflow/compiler/xla/client:local_client",
         "//tensorflow/compiler/xla/tests:client_library_test_base",
         "//tensorflow/compiler/xla/tests:literal_test_util",
+        "//tensorflow/compiler/xla/tests:test_utils",
         "//tensorflow/compiler/xla/tests:xla_internal_test_main",
         "//tensorflow/core:lib",
         "//tensorflow/core:test",

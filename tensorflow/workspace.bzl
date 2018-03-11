@@ -12,6 +12,8 @@ load("//third_party/toolchains/cpus/arm:arm_compiler_configure.bzl", "arm_compil
 load("//third_party:repo.bzl", "tf_http_archive")
 load("@io_bazel_rules_closure//closure/private:java_import_external.bzl", "java_import_external")
 load("@io_bazel_rules_closure//closure:defs.bzl", "filegroup_external")
+load("//tensorflow/tools/def_file_filter:def_file_filter_configure.bzl",
+     "def_file_filter_configure")
 
 def _extract_version_number(bazel_version):
   """Extracts the semantic version number from a version string
@@ -67,13 +69,17 @@ def tf_workspace(path_prefix="", tf_repo_name=""):
   # We must check the bazel version before trying to parse any other BUILD
   # files, in case the parsing of those build files depends on the bazel
   # version we require here.
-  check_bazel_version_at_least("0.5.4")
+  check_bazel_version_at_least("0.10.0")
   clang6_configure(name="local_config_clang6")
   cuda_configure(name="local_config_cuda")
   tensorrt_configure(name="local_config_tensorrt")
   git_configure(name="local_config_git")
   sycl_configure(name="local_config_sycl")
   python_configure(name="local_config_python")
+
+  # For windows bazel build
+  # TODO: Remove def file filter when TensorFlow can export symbols properly on Windows.
+  def_file_filter_configure(name = "local_config_def_file_filter")
 
   # Point //external/local_config_arm_compiler to //external/arm_compiler
   arm_compiler_configure(
@@ -215,7 +221,6 @@ def tf_workspace(path_prefix="", tf_repo_name=""):
       urls = [
           "https://mirror.bazel.build/www.nasm.us/pub/nasm/releasebuilds/2.12.02/nasm-2.12.02.tar.bz2",
           "http://pkgs.fedoraproject.org/repo/pkgs/nasm/nasm-2.12.02.tar.bz2/d15843c3fb7db39af80571ee27ec6fad/nasm-2.12.02.tar.bz2",
-          "http://www.nasm.us/pub/nasm/releasebuilds/2.12.02/nasm-2.12.02.tar.bz2",
       ],
       sha256 = "00b0891c678c065446ca59bcee64719d0096d54d6886e6e472aeee2e170ae324",
       strip_prefix = "nasm-2.12.02",
@@ -476,11 +481,11 @@ def tf_workspace(path_prefix="", tf_repo_name=""):
   tf_http_archive(
       name = "llvm",
       urls = [
-          "https://mirror.bazel.build/github.com/llvm-mirror/llvm/archive/8f7bcdf3c65b9a47e35653d525135beb18f3ac25.tar.gz",
-          "https://github.com/llvm-mirror/llvm/archive/8f7bcdf3c65b9a47e35653d525135beb18f3ac25.tar.gz",
+          "https://mirror.bazel.build/github.com/llvm-mirror/llvm/archive/636e2230de961637b059b9cd15799daef32544f8.tar.gz",
+          "https://github.com/llvm-mirror/llvm/archive/636e2230de961637b059b9cd15799daef32544f8.tar.gz",
       ],
-      sha256 = "63d4da54dc7bc9a79e2ad266d230f4f759520cccb344a2dd49c2c6383ab75285",
-      strip_prefix = "llvm-8f7bcdf3c65b9a47e35653d525135beb18f3ac25",
+      sha256 = "44f08a32ac48eca545fd6eac4d5ef3a9cea4382f805b87dce38340255e7d2138",
+      strip_prefix = "llvm-636e2230de961637b059b9cd15799daef32544f8",
       build_file = str(Label("//third_party/llvm:llvm.BUILD")),
   )
 

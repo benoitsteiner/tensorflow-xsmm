@@ -182,6 +182,7 @@ StatusOr<std::unique_ptr<HloInstruction>> HloInstruction::CreateFromProto(
 /* static */ std::unique_ptr<HloInstruction>
 HloInstruction::CreateGetTupleElement(const Shape& shape,
                                       HloInstruction* operand, int64 index) {
+  CHECK(ShapeUtil::IsTuple(operand->shape()));
   auto instruction =
       WrapUnique(new HloInstruction(HloOpcode::kGetTupleElement, shape));
   instruction->tuple_index_ = index;
@@ -2682,8 +2683,10 @@ Status HloInstruction::Visit(DfsHloVisitorBase<HloInstructionPtr>* visitor) {
     case HloOpcode::kTrace:
       break;
   }
-  return Unimplemented("unhandled HloOpcode for DfsHloVisitor: %s",
-                       HloOpcodeString(opcode_).c_str());
+  return InternalError(
+      "Unhandled HloOpcode for DfsHloVisitor: %s. This should not happen - "
+      "please file a bug for XLA.",
+      HloOpcodeString(opcode_).c_str());
 }
 
 // Explicit instantiations.

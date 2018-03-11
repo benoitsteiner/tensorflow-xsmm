@@ -89,8 +89,6 @@ See the @{$python/math_ops} guide.
 @@matrix_inverse
 @@cholesky
 @@cholesky_solve
-@@matrix_exponential
-@@matrix_logarithm
 @@matrix_solve
 @@matrix_triangular_solve
 @@matrix_solve_ls
@@ -181,6 +179,11 @@ arg_max = deprecation.deprecated(None, "Use `argmax` instead")(arg_max)  # pylin
 arg_min = deprecation.deprecated(None, "Use `argmin` instead")(arg_min)  # pylint: disable=used-before-assignment
 
 
+# This is set by resource_variable_ops.py. It is included in this way since
+# there is a circular dependency between math_ops and resource_variable_ops
+_resource_variable_type = None
+
+
 def _set_doc(doc):
 
   def _decorator(func):
@@ -263,7 +266,7 @@ def abs(x, name=None):  # pylint: disable=redefined-builtin
   with ops.name_scope(name, "Abs", [x]) as name:
     if isinstance(x, sparse_tensor.SparseTensor):
       if x.values.dtype.is_complex:
-        x_abs = gen_math_ops._complex_abs(
+        x_abs = gen_math_ops.complex_abs(
             x.values, Tout=x.values.dtype.real_dtype, name=name)
         return sparse_tensor.SparseTensor(
             indices=x.indices, values=x_abs, dense_shape=x.dense_shape)
@@ -273,7 +276,7 @@ def abs(x, name=None):  # pylint: disable=redefined-builtin
     else:
       x = ops.convert_to_tensor(x, name="x")
       if x.dtype.is_complex:
-        return gen_math_ops._complex_abs(x, Tout=x.dtype.real_dtype, name=name)
+        return gen_math_ops.complex_abs(x, Tout=x.dtype.real_dtype, name=name)
       return gen_math_ops._abs(x, name=name)
 
 
@@ -282,7 +285,7 @@ def abs(x, name=None):  # pylint: disable=redefined-builtin
 
 # pylint: disable=redefined-builtin
 def _bucketize(input, boundaries, name=None):
-  return gen_math_ops._bucketize(input=input, boundaries=boundaries, name=name)
+  return gen_math_ops.bucketize(input=input, boundaries=boundaries, name=name)
 
 
 # pylint: enable=redefined-builtin
@@ -325,10 +328,10 @@ def divide(x, y, name=None):
 
 @tf_export("multiply")
 def multiply(x, y, name=None):
-  return gen_math_ops._mul(x, y, name)
+  return gen_math_ops.mul(x, y, name)
 
 
-multiply.__doc__ = gen_math_ops._mul.__doc__.replace("Mul", "`tf.multiply`")
+multiply.__doc__ = gen_math_ops.mul.__doc__.replace("Mul", "`tf.multiply`")
 
 
 # TODO(aselle): put deprecation in after another round of global code changes
@@ -336,19 +339,19 @@ multiply.__doc__ = gen_math_ops._mul.__doc__.replace("Mul", "`tf.multiply`")
     "2016-12-30",
     "`tf.mul(x, y)` is deprecated, please use `tf.multiply(x, y)` or `x * y`")
 def _mul(x, y, name=None):
-  return gen_math_ops._mul(x, y, name)
+  return gen_math_ops.mul(x, y, name)
 
 
 _mul.__doc__ = (
-    gen_math_ops._mul.__doc__ + ("" if _mul.__doc__ is None else _mul.__doc__))
+    gen_math_ops.mul.__doc__ + ("" if _mul.__doc__ is None else _mul.__doc__))
 
 
 @tf_export("subtract")
 def subtract(x, y, name=None):
-  return gen_math_ops._sub(x, y, name)
+  return gen_math_ops.sub(x, y, name)
 
 
-subtract.__doc__ = gen_math_ops._sub.__doc__.replace("`Sub`", "`tf.subtract`")
+subtract.__doc__ = gen_math_ops.sub.__doc__.replace("`Sub`", "`tf.subtract`")
 
 
 # TODO(aselle): put deprecation in after another round of global code changes
@@ -356,11 +359,11 @@ subtract.__doc__ = gen_math_ops._sub.__doc__.replace("`Sub`", "`tf.subtract`")
     "2016-12-30",
     "`tf.sub(x, y)` is deprecated, please use `tf.subtract(x, y)` or `x - y`")
 def _sub(x, y, name=None):
-  return gen_math_ops._sub(x, y, name)
+  return gen_math_ops.sub(x, y, name)
 
 
 _sub.__doc__ = (
-    gen_math_ops._sub.__doc__ + ("" if _sub.__doc__ is None else _sub.__doc__))
+    gen_math_ops.sub.__doc__ + ("" if _sub.__doc__ is None else _sub.__doc__))
 
 
 # pylint: disable=g-docstring-has-escape
@@ -380,11 +383,11 @@ def negative(x, name=None):
   """
   with ops.name_scope(name, "Neg", [x]) as name:
     if isinstance(x, sparse_tensor.SparseTensor):
-      x_neg = gen_math_ops._neg(x.values, name=name)
+      x_neg = gen_math_ops.neg(x.values, name=name)
       return sparse_tensor.SparseTensor(
           indices=x.indices, values=x_neg, dense_shape=x.dense_shape)
     else:
-      return gen_math_ops._neg(x, name=name)
+      return gen_math_ops.neg(x, name=name)
 
 
 # pylint: enable=g-docstring-has-escape
@@ -932,7 +935,7 @@ def to_complex128(x, name="ToComplex128"):
   return cast(x, dtypes.complex128, name=name)
 
 
-ops.Tensor._override_operator("__neg__", gen_math_ops._neg)
+ops.Tensor._override_operator("__neg__", gen_math_ops.neg)
 ops.Tensor._override_operator("__abs__", abs)
 # __invert__ corresponds to the ~ operator.  Here we follow the numpy convention
 # ~ marks an elementwise bit-wise inverse.  This is only implemented for boolean
@@ -1061,7 +1064,7 @@ def _truediv_python3(x, y, name=None):
     if dtype is not None:
       x = cast(x, dtype)
       y = cast(y, dtype)
-    return gen_math_ops._real_div(x, y, name=name)
+    return gen_math_ops.real_div(x, y, name=name)
 
 
 def _div_python2(x, y, name=None):
@@ -1084,9 +1087,9 @@ def _div_python2(x, y, name=None):
       raise TypeError("x and y must have the same dtype, got %r != %r" %
                       (x_dtype, y_dtype))
     if x_dtype.is_floating or x_dtype.is_complex:
-      return gen_math_ops._real_div(x, y, name=name)
+      return gen_math_ops.real_div(x, y, name=name)
     else:
-      return gen_math_ops._floor_div(x, y, name=name)
+      return gen_math_ops.floor_div(x, y, name=name)
 
 
 @tf_export("truediv")
@@ -1144,7 +1147,7 @@ def div(x, y, name=None):
 
 
 # TODO(aselle): This should be removed
-mod = gen_math_ops._floor_mod
+mod = gen_math_ops.floor_mod
 
 
 # TODO(aselle): Deprecate this once all internal functionality uses
@@ -1177,22 +1180,22 @@ def floordiv(x, y, name=None):
     TypeError: If the inputs are complex.
   """
   with ops.name_scope(name, "floordiv", [x, y]) as name:
-    return gen_math_ops._floor_div(x, y, name=name)
+    return gen_math_ops.floor_div(x, y, name=name)
 
 
-realdiv = gen_math_ops._real_div
-truncatediv = gen_math_ops._truncate_div
+realdiv = gen_math_ops.real_div
+truncatediv = gen_math_ops.truncate_div
 # TODO(aselle): Rename this to floordiv when we can.
-floor_div = gen_math_ops._floor_div
-truncatemod = gen_math_ops._truncate_mod
-floormod = gen_math_ops._floor_mod
+floor_div = gen_math_ops.floor_div
+truncatemod = gen_math_ops.truncate_mod
+floormod = gen_math_ops.floor_mod
 
 
 def _mul_dispatch(x, y, name=None):
   """Dispatches cwise mul for "Dense*Dense" and "Dense*Sparse"."""
   is_tensor_y = isinstance(y, ops.Tensor)
   if is_tensor_y:
-    return gen_math_ops._mul(x, y, name=name)
+    return gen_math_ops.mul(x, y, name=name)
   else:
     assert isinstance(y, sparse_tensor.SparseTensor)  # Case: Dense * Sparse.
     new_vals = gen_sparse_ops.sparse_dense_cwise_mul(y.indices, y.values,
@@ -1211,12 +1214,12 @@ _OverrideBinaryOperatorHelper(gen_sparse_ops.sparse_dense_cwise_mul, "mul",
                               sparse_tensor.SparseTensor)
 
 _OverrideBinaryOperatorHelper(gen_math_ops.add, "add")
-_OverrideBinaryOperatorHelper(gen_math_ops._sub, "sub")
+_OverrideBinaryOperatorHelper(gen_math_ops.sub, "sub")
 _OverrideBinaryOperatorHelper(_mul_dispatch, "mul")
 _OverrideBinaryOperatorHelper(_div_python2, "div")
 _OverrideBinaryOperatorHelper(_truediv_python3, "truediv")
 _OverrideBinaryOperatorHelper(floordiv, "floordiv")
-_OverrideBinaryOperatorHelper(gen_math_ops._floor_mod, "mod")
+_OverrideBinaryOperatorHelper(gen_math_ops.floor_mod, "mod")
 _OverrideBinaryOperatorHelper(pow, "pow")
 
 
@@ -1538,7 +1541,7 @@ def reduce_mean(input_tensor,
   if keepdims is None:
     keepdims = False
   return _may_reduce_to_scalar(keepdims, axis, reduction_indices,
-                               gen_math_ops._mean(
+                               gen_math_ops.mean(
                                    input_tensor,
                                    _ReductionDims(input_tensor, axis,
                                                   reduction_indices),
@@ -1588,7 +1591,7 @@ def reduce_prod(input_tensor,
   if keepdims is None:
     keepdims = False
   return _may_reduce_to_scalar(keepdims, axis, reduction_indices,
-                               gen_math_ops._prod(
+                               gen_math_ops.prod(
                                    input_tensor,
                                    _ReductionDims(input_tensor, axis,
                                                   reduction_indices),
@@ -2041,8 +2044,15 @@ def matmul(a,
     if transpose_b and adjoint_b:
       raise ValueError("Only one of transpose_b and adjoint_b can be True.")
 
-    a = ops.convert_to_tensor(a, name="a")
-    b = ops.convert_to_tensor(b, name="b")
+    if context.executing_eagerly():
+      if not isinstance(a, (ops.EagerTensor, _resource_variable_type)):
+        a = ops.convert_to_tensor(a, name="a")
+      if not isinstance(b, (ops.EagerTensor, _resource_variable_type)):
+        b = ops.convert_to_tensor(b, name="b")
+    else:
+      a = ops.convert_to_tensor(a, name="a")
+      b = ops.convert_to_tensor(b, name="b")
+
     # TODO(apassos) remove _shape_tuple here when it is not needed.
     a_shape = a._shape_tuple()  # pylint: disable=protected-access
     b_shape = b._shape_tuple()  # pylint: disable=protected-access
@@ -2057,7 +2067,7 @@ def matmul(a,
       if transpose_b:
         b = conj(b)
         adjoint_b = True
-      return gen_math_ops._batch_mat_mul(
+      return gen_math_ops.batch_mat_mul(
           a, b, adj_x=adjoint_a, adj_y=adjoint_b, name=name)
 
     # Neither matmul nor sparse_matmul support adjoint, so we conjugate
@@ -2094,13 +2104,13 @@ def matmul(a,
         ret = cast(ret, dtypes.bfloat16)
       return ret
     else:
-      return gen_math_ops._mat_mul(
+      return gen_math_ops.mat_mul(
           a, b, transpose_a=transpose_a, transpose_b=transpose_b, name=name)
 
 
 _OverrideBinaryOperatorHelper(matmul, "matmul")
 
-sparse_matmul = gen_math_ops._sparse_mat_mul
+sparse_matmul = gen_math_ops.sparse_mat_mul
 
 
 @ops.RegisterStatistics("MatMul", "flops")
@@ -2205,7 +2215,7 @@ def add_n(inputs, name=None):
     if name:
       return array_ops.identity(inputs[0], name=name)
     return inputs[0]
-  return gen_math_ops._add_n(inputs, name=name)
+  return gen_math_ops.add_n(inputs, name=name)
 
 
 @tf_export("accumulate_n")
@@ -2276,14 +2286,14 @@ def accumulate_n(inputs, shape=None, tensor_dtype=None, name=None):
     return inputs[0]
   elif len(inputs) == 1 and name is not None:
     return array_ops.identity(inputs[0], name=name)
-  elif context.in_eager_mode():
+  elif context.executing_eagerly():
     # TemporaryVariable not currently supported in eager mode; fall back
     # onto AddN for now.
     # TODO(frreiss) remove this once the lifetime of eager variables gets
     # addressed
     return add_n(inputs, name=name)
   else:
-    return gen_math_ops._accumulate_nv2(inputs, name=name, shape=shape)  # pylint: disable=protected-access
+    return gen_math_ops.accumulate_nv2(inputs, name=name, shape=shape)  # pylint: disable=protected-access
 
 
 @ops.RegisterGradient("AccumulateNV2")
@@ -2313,7 +2323,7 @@ def sigmoid(x, name=None):
   """
   with ops.name_scope(name, "Sigmoid", [x]) as name:
     x = ops.convert_to_tensor(x, name="x")
-    return gen_math_ops._sigmoid(x, name=name)
+    return gen_math_ops.sigmoid(x, name=name)
 
 
 @tf_export("log_sigmoid")
@@ -2332,7 +2342,7 @@ def log_sigmoid(x, name=None):
   """
   with ops.name_scope(name, "LogSigmoid", [x]) as name:
     x = ops.convert_to_tensor(x, name="x")
-    return gen_math_ops._neg(gen_nn_ops.softplus(-x), name=name)
+    return gen_math_ops.neg(gen_nn_ops.softplus(-x), name=name)
 
 
 @tf_export("nn.tanh", "tanh")
@@ -2349,11 +2359,11 @@ def tanh(x, name=None):
   """
   with ops.name_scope(name, "Tanh", [x]) as name:
     if isinstance(x, sparse_tensor.SparseTensor):
-      x_tanh = gen_math_ops._tanh(x.values, name=name)
+      x_tanh = gen_math_ops.tanh(x.values, name=name)
       return sparse_tensor.SparseTensor(
           indices=x.indices, values=x_tanh, dense_shape=x.dense_shape)
     else:
-      return gen_math_ops._tanh(x, name=name)
+      return gen_math_ops.tanh(x, name=name)
 
 
 @tf_export("bincount")
@@ -2542,7 +2552,7 @@ def conj(x, name=None):
   with ops.name_scope(name, "Conj", [x]) as name:
     x = ops.convert_to_tensor(x, name="x")
     if x.dtype.is_complex or x.dtype == dtypes.variant:
-      return gen_math_ops._conj(x, name=name)
+      return gen_math_ops.conj(x, name=name)
     elif x.dtype.is_floating or x.dtype.is_integer:
       return x
     else:
