@@ -838,41 +838,51 @@ class _EagerTensorBase(Tensor):
   def set_shape(self, shape):
     if not self.shape.is_compatible_with(shape):
       raise ValueError(
-          "EagerTensor's shape %s is not compatible with supplied shape %s" %
+          "Tensor's shape %s is not compatible with supplied shape %s" %
           (self.shape, shape))
 
   # Methods not supported / implemented for Eager Tensors.
   @property
   def op(self):
-    raise AttributeError("op not supported for Eager Tensors.")
+    raise AttributeError(
+        "Tensor.op is meaningless when eager execution is enabled.")
 
   @property
   def graph(self):
-    raise AttributeError("graph not supported for Eager Tensors.")
+    raise AttributeError(
+        "Tensor.graph is meaningless when eager execution is enabled.")
 
   @property
   def name(self):
-    raise AttributeError("name not supported for Eager Tensors.")
+    raise AttributeError(
+        "Tensor.name is meaningless when eager execution is enabled.")
 
   @property
   def value_index(self):
-    raise AttributeError("value_index not supported for Eager Tensors.")
+    raise AttributeError(
+        "Tensor.value_index is meaningless when eager execution is enabled.")
 
   def consumers(self):
-    raise NotImplementedError("consumers not supported for Eager Tensors.")
+    raise NotImplementedError(
+        "Tensor.consumers is meaningless when eager execution is enabled.")
 
   def _add_consumer(self, consumer):
-    raise NotImplementedError("_add_consumer not supported for Eager Tensors.")
+    raise NotImplementedError(
+        "_add_consumer not supported when eager execution is enabled.")
 
   def _as_node_def_input(self):
     raise NotImplementedError(
-        "_as_node_def_input not supported for Eager Tensors.")
+        "_as_node_def_input not supported when eager execution is enabled.")
 
   def _as_tf_output(self):
-    raise NotImplementedError("_as_tf_output not supported for Eager Tensors.")
+    raise NotImplementedError(
+        "_as_tf_output not supported when eager execution is enabled.")
 
   def eval(self, feed_dict=None, session=None):
-    raise NotImplementedError("eval not supported for Eager Tensors.")
+    raise NotImplementedError(
+        "eval is not supported when eager execution is enabled, "
+        "is .numpy() what you're looking for?"
+    )
 
 
 # This call creates an EagerTensor class, as a subclass of _EagerTensorBase, and
@@ -2717,8 +2727,6 @@ class Graph(object):
     self._next_id_counter = 0  # GUARDED_BY(self._lock)
     self._nodes_by_name = dict()  # GUARDED_BY(self._lock)
     self._version = 0  # GUARDED_BY(self._lock)
-    # Current name stack: uniquified names
-    self._name_stack = ""
     # Maps a name used in the graph to the next id to use for that name.
     self._names_in_use = {}
     self._stack_state_is_thread_local = False
@@ -3293,6 +3301,20 @@ class Graph(object):
           input_types=input_types,
           original_op=self._default_original_op,
           op_def=op_def)
+
+      # TODO(vrv): Instead of eagerly filling in shape property for every op,
+      # only populate the shape when requested.
+      #
+      # TODO(skyewm): unlike in the original Python implementation, the C API
+      # always computes shape information (even for function calls, which the
+      # original Python shape inference code doesn't handle). Deprecate the
+      # compute_shapes argument.
+      #
+      # TODO(b/74620627): move this back to _create_op_helper once _USE_C_SHAPES
+      # is removed
+      if (ret._c_op and _USE_C_SHAPES) or compute_shapes:  # pylint: disable=protected-access
+        set_shapes_for_outputs(ret)
+
       self._create_op_helper(ret, compute_shapes=compute_shapes,
                              compute_device=compute_device)
     return ret
@@ -3326,15 +3348,6 @@ class Graph(object):
 
   def _create_op_helper(self, op, compute_shapes=True, compute_device=True):
     """Common logic for creating an op in this graph."""
-    # TODO(vrv): Instead of eagerly filling in shape property for every op, only
-    # populate the shape when requested.
-    #
-    # TODO(skyewm): unlike in the original Python implementation, the C API
-    # always computes shape information (even for function calls, which the
-    # original Python shape inference code doesn't handle). Deprecate the
-    # compute_shapes argument.
-    if (op._c_op and _USE_C_SHAPES) or compute_shapes:  # pylint: disable=protected-access
-      set_shapes_for_outputs(op)
     # TODO(b/XXXX): move to Operation.__init__ once _USE_C_API flag is removed.
     self._add_op(op)
 
@@ -3439,6 +3452,12 @@ class Graph(object):
     ]
 
     for op in new_ops:
+      # The Python shape inference code does not support imported functions. It
+      # also needs access to op.inputs, which is why we call it here.
+      # TODO(b/74620627): move this back to _create_op_helper once _USE_C_SHAPES
+      # is removed.
+      if not self._is_function(op.type) or _USE_C_SHAPES:
+        set_shapes_for_outputs(op)
       new_control_inputs = self._control_dependencies_for_inputs(op.inputs)
       # pylint: disable=protected-access
       op._add_control_inputs(new_control_inputs)
@@ -3885,6 +3904,17 @@ class Graph(object):
       yield
     finally:
       self._default_original_op = old_original_op
+
+  @property
+  def _name_stack(self):
+    # This may be called from a thread where name_stack doesn't yet exist.
+    if not hasattr(self._thread_local, "_name_stack"):
+      self._thread_local._name_stack = ""
+    return self._thread_local._name_stack
+
+  @_name_stack.setter
+  def _name_stack(self, name_stack):
+    self._thread_local._name_stack = name_stack
 
   # pylint: disable=g-doc-return-or-yield,line-too-long
   @tf_contextlib.contextmanager
@@ -5095,11 +5125,12 @@ class _DefaultGraphStack(_DefaultStack):  # pylint: disable=protected-access
   @tf_contextlib.contextmanager
   def get_controller(self, default):
     try:
-      context.context_stack.push(default.building_function, default.as_default)
+      context.context().context_switches.push(default.building_function,
+                                              default.as_default)
       with super(_DefaultGraphStack, self).get_controller(default) as g:
         yield g
     finally:
-      context.context_stack.pop()
+      context.context().context_switches.pop()
 
 
 _default_graph_stack = _DefaultGraphStack()
@@ -5125,13 +5156,13 @@ def init_scope():
         graph function. Here, a context is defined as either a graph or an eager
         context. Every context switch, i.e., every installation of a graph as
         the default graph and every switch into eager mode, is logged in a
-        thread-local stack called the `context_stack`; the log entry for a
+        thread-local stack called `context_switches`; the log entry for a
         context switch is popped from the stack when the context is exited.
-        Entering an `init_scope` is equivalent to crawling up the
-        `context_stack`, finding the first context that is not building a graph
-        function, and entering it. A caveat is that if graph mode is enabled
-        but the default graph stack is empty, then entering an `init_scope`
-        will simply install a fresh graph as the default one.
+        Entering an `init_scope` is equivalent to crawling up
+        `context_switches`, finding the first context that is not building a
+        graph function, and entering it. A caveat is that if graph mode is
+        enabled but the default graph stack is empty, then entering an
+        `init_scope` will simply install a fresh graph as the default one.
 
     (3) The gradient tape is paused while the scope is active.
   """
@@ -5161,7 +5192,7 @@ def init_scope():
       outer_context = default_graph.as_default
     else:
       # Find a context that is not building a function.
-      for stack_entry in reversed(context.context_stack.stack):
+      for stack_entry in reversed(context.context().context_switches.stack):
         if not stack_entry.is_building_function:
           outer_context = stack_entry.enter_context_fn
           break
@@ -5184,7 +5215,8 @@ def init_scope():
 
 
 @tf_export("enable_eager_execution")
-def enable_eager_execution(config=None, device_policy=None):
+def enable_eager_execution(config=None, device_policy=None,
+                           execution_mode=None):
   """Enables eager execution for the lifetime of this program.
 
   Eager execution provides an imperative interface to TensorFlow. With eager
@@ -5210,13 +5242,15 @@ def enable_eager_execution(config=None, device_policy=None):
 
   Args:
     config: (Optional.) A @{tf.ConfigProto} to use to configure the environment
-     in which operations are executed. Note that @{tf.ConfigProto} is also
-     used to configure graph execution (via @{tf.Session}) and many options
-     within `tf.ConfigProto` are not implemented (or are irrelevant) when
+      in which operations are executed. Note that @{tf.ConfigProto} is also
+      used to configure graph execution (via @{tf.Session}) and many options
+      within `tf.ConfigProto` are not implemented (or are irrelevant) when
      eager execution is enabled.
     device_policy: (Optional.) Policy controlling how operations requiring
      inputs on a specific device (e.g., a GPU 0) handle inputs on a different
-     device  (e.g. GPU 1 or CPU).
+     device  (e.g. GPU 1 or CPU). When set to None, an appropriate value will be
+     picked automatically. The value picked may change between TensorFlow
+     releases.
      Valid values:
 
       - tf.contrib.eager.DEVICE_PLACEMENT_EXPLICIT: raises an error if the
@@ -5232,6 +5266,15 @@ def enable_eager_execution(config=None, device_policy=None):
 
       - tf.contrib.eager.DEVICE_PLACEMENT_SILENT_FOR_INT32: silently copies
         int32 tensors, raising errors on the other ones.
+    execution_mode: (Optional.) Policy controlling how operations dispatched are
+      actually executed. When set to None, an appropriate value will be picked
+      automatically. The value picked may change between TensorFlow releases.
+      Valid values:
+
+        - tf.contrib.eager.SYNC: executes each operation synchronously.
+
+        - tf.contrib.eager.ASYNC: executes each operation asynchronously. These
+          operations may return "non-ready" handles.
 
   Raises:
     ValueError: If eager execution is enabled after creating/executing a
@@ -5248,6 +5291,10 @@ def enable_eager_execution(config=None, device_policy=None):
     raise ValueError(
         "device_policy must be one of None, tf.contrib.eager.DEVICE_PLACEMENT_*"
     )
+  if execution_mode not in (None, context.SYNC, context.ASYNC):
+    raise ValueError(
+        "execution_mode must be one of None, tf.contrib.eager.SYNC, "
+        "tf.contrib.eager.ASYNC")
   # pylint: disable=protected-access
   if context._default_mode == context.GRAPH_MODE:
     graph_mode_has_been_used = (
@@ -5258,24 +5305,23 @@ def enable_eager_execution(config=None, device_policy=None):
           "tf.enable_eager_execution must be called at program startup.")
   context._default_mode = context.EAGER_MODE
   if context._context is None:
-    context._context = context.Context(config=config,
-                                       device_policy=device_policy)
-    if context.context_stack.stack:
-      raise AssertionError("Invariant violated: The context stack must "
-                           "be empty when eager execution is enabled.")
-    # Log that eager execution has been enabled by pushing an entry onto the
-    # context stack; this entry won't ever be popped, as it's impossible to
-    # disable eager execution
-    context.context_stack.push(False, context.eager_mode)
-  elif ((config is not None and config is not context._context._config)
-        or (device_policy is not None
-            and device_policy is not context._context._device_policy)):
+    context._context = context.Context(
+        config=config,
+        device_policy=device_policy,
+        execution_mode=execution_mode)
+  elif ((config is not None and config is not context._context._config) or
+        (device_policy is not None and
+         device_policy is not context._context._device_policy) or
+        (execution_mode is not None and
+         execution_mode is not context._context._execution_mode)):
     raise ValueError("Trying to change the options of an active eager"
                      " execution. Context config: %s, specified config:"
-                     " %s. Context device policy: %s; specified device"
-                     " policy: %s." % (config, context._context._config,
-                                       device_policy,
-                                       context._context._device_policy))
+                     " %s. Context device policy: %s, specified device"
+                     " policy: %s. Context execution mode: %s, "
+                     " specified execution mode %s." %
+                     (context._context._config, config,
+                      context._context._device_policy, device_policy,
+                      context._context._execution_mode, execution_mode))
   else:
     raise ValueError(
         "tf.enable_eager_execution must be called at program startup.")
@@ -5921,8 +5967,9 @@ def get_from_proto_function(collection_name):
 def _assert_collection_is_ok(collection_name):
   if context.executing_eagerly():
     if collection_name in GraphKeys._VARIABLE_COLLECTIONS:  # pylint: disable=protected-access
-      raise ValueError("When Eager Execution is enabled, variable "
-                       "collections are not supported.")
+      raise ValueError(
+          "variable collections are not supported when eager execution is enabled."
+      )
 
 
 def _operation_conversion_error(op, dtype=None, name=None, as_ref=False):
