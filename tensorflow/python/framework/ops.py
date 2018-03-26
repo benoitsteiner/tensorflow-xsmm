@@ -1916,7 +1916,8 @@ class Operation(object):
     tensor._add_consumer(self)  # pylint: disable=protected-access
     self._recompute_node_def()
 
-  def _update_input(self, index, tensor):
+  # TODO(skyewm): Remove `update_dtype` when we enable the C API.
+  def _update_input(self, index, tensor, update_dtype=True):
     """Update the input to this operation at the given index.
 
     NOTE: This is for TF internal use only. Please don't use it.
@@ -1924,6 +1925,7 @@ class Operation(object):
     Args:
       index: the index of the input to update.
       tensor: the Tensor to be used as the input at the given index.
+      update_dtype: If `False`, the type for this input is not updated.
 
     Raises:
       TypeError: if tensor is not a Tensor,
@@ -1943,7 +1945,8 @@ class Operation(object):
     else:
       self._inputs_val[index].consumers().remove(self)
       self._inputs_val[index] = tensor
-      self._input_types_val[index] = tensor.dtype
+      if update_dtype:
+        self._input_types_val[index] = tensor.dtype
       tensor._add_consumer(self)  # pylint: disable=protected-access
       self._recompute_node_def()
 
@@ -3452,12 +3455,12 @@ class Graph(object):
     ]
 
     for op in new_ops:
-      # The Python shape inference code does not support imported functions. It
-      # also needs access to op.inputs, which is why we call it here.
+      # Operations created by the C API always retrieve shapes from the C API so
+      # we preserve the shapes of ops created in import_graph_def (from the
+      # "_output_shapes" attr of the imported NodeDef).
       # TODO(b/74620627): move this back to _create_op_helper once _USE_C_SHAPES
       # is removed.
-      if not self._is_function(op.type) or _USE_C_SHAPES:
-        set_shapes_for_outputs(op)
+      _set_shapes_for_outputs_c_api(op)
       new_control_inputs = self._control_dependencies_for_inputs(op.inputs)
       # pylint: disable=protected-access
       op._add_control_inputs(new_control_inputs)
@@ -5408,7 +5411,7 @@ def get_name_scope():
   Returns:
     A string representing the current name scope.
   """
-  if context.in_eager_mode():
+  if context.executing_eagerly():
     return context.context().scope_name.rstrip("/")
   return get_default_graph().get_name_scope()
 

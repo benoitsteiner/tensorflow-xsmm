@@ -241,6 +241,13 @@ config_setting(
 )
 
 config_setting(
+    name = "with_kafka_support_windows_override",
+    define_values = {"with_kafka_support": "true"},
+    values = {"cpu": "x64_windows"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
     name = "with_gcp_support_android_override",
     define_values = {"with_gcp_support": "true"},
     values = {"crosstool_top": "//external:android/crosstool"},
@@ -610,6 +617,7 @@ filegroup(
         "//tensorflow/contrib/verbs:all_files",
         "//tensorflow/core:all_files",
         "//tensorflow/core/api_def:all_files",
+        "//tensorflow/core/common_runtime/eager:all_files",
         "//tensorflow/core/debug:all_files",
         "//tensorflow/core/distributed_runtime:all_files",
         "//tensorflow/core/distributed_runtime/rpc:all_files",
@@ -785,7 +793,7 @@ tf_cc_shared_object(
     linkopts = select({
         "//tensorflow:darwin": [
             "-Wl,-exported_symbols_list",  # This line must be directly followed by the exported_symbols.lds file
-            "//tensorflow/c:exported_symbols.lds",
+            "$(location //tensorflow/c:exported_symbols.lds)",
             "-Wl,-install_name,@rpath/libtensorflow.so",
         ],
         "//tensorflow:windows": [],
@@ -794,7 +802,7 @@ tf_cc_shared_object(
             "-z defs",
             "-s",
             "-Wl,--version-script",  #  This line must be directly followed by the version_script.lds file
-            "//tensorflow/c:version_script.lds",
+            "$(location //tensorflow/c:version_script.lds)",
         ],
     }),
     deps = [
@@ -812,7 +820,7 @@ tf_cc_shared_object(
     linkopts = select({
         "//tensorflow:darwin": [
             "-Wl,-exported_symbols_list",  # This line must be directly followed by the exported_symbols.lds file
-            "//tensorflow:tf_exported_symbols.lds",
+            "$(location //tensorflow:tf_exported_symbols.lds)",
         ],
         "//tensorflow:windows": [],
         "//tensorflow:windows_msvc": [],
@@ -820,7 +828,7 @@ tf_cc_shared_object(
             "-z defs",
             "-s",
             "-Wl,--version-script",  #  This line must be directly followed by the version_script.lds file
-            "//tensorflow:tf_version_script.lds",
+            "$(location //tensorflow:tf_version_script.lds)",
         ],
     }),
     deps = [
