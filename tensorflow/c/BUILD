@@ -34,6 +34,8 @@ filegroup(
         exclude = [
             "c_api_experimental.cc",
             "c_api_experimental.h",
+            "python_api.cc",
+            "python_api.h",
             "*test*",
         ],
     ),
@@ -220,6 +222,7 @@ tf_cc_test(
     name = "c_api_experimental_test",
     size = "small",
     srcs = ["c_api_experimental_test.cc"],
+    data = ["testdata/tf_record"],
     linkopts = select({
         "//tensorflow:darwin": ["-headerpad_max_install_names"],
         "//conditions:default": [],
@@ -230,6 +233,7 @@ tf_cc_test(
     deps = [
         ":c_api_experimental",
         ":c_test_util",
+        "//tensorflow/core:lib",
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
     ],
@@ -279,20 +283,7 @@ tf_cuda_library(
     deps = [
         ":c_api",
         ":c_api_internal",
+        # TODO(b/74620627): remove when _USE_C_SHAPES is removed
+        "//tensorflow/python:cpp_shape_inference_proto_cc",
     ],
-)
-
-# -----------------------------------------------------------------------------
-# Google-internal targets.
-
-filegroup(
-    name = "all_files",
-    srcs = glob(
-        ["**/*"],
-        exclude = [
-            "**/METADATA",
-            "**/OWNERS",
-        ],
-    ),
-    visibility = ["//tensorflow:__subpackages__"],
 )

@@ -294,9 +294,7 @@ py_test(
         "//tensorflow/python:errors",
         "//tensorflow/python:framework_ops",
         "//tensorflow/python:lib",
-        "//tensorflow/python:math_ops",
         "//tensorflow/python:parsing_ops",
-        "//tensorflow/python:string_ops",
         "//tensorflow/python:util",
         "//tensorflow/python/data/ops:iterator_ops",
         "//third_party/py/numpy",
@@ -509,18 +507,4 @@ tf_py_test(
         "//tensorflow/python:sparse_tensor",
         "//third_party/py/numpy",
     ],
-)
-
-filegroup(
-    name = "all_files",
-    srcs = glob(
-        include = [
-            "**/*",
-        ],
-        exclude = [
-            "**/METADATA",
-            "**/OWNERS",
-        ],
-    ),
-    visibility = ["//tensorflow:__subpackages__"],
 )

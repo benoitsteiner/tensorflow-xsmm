@@ -30,7 +30,11 @@ tf_cuda_library(
             "//tensorflow/core:core_cpu",
             "//tensorflow/core/common_runtime/eager:context",
             "//tensorflow/core/common_runtime/eager:eager_executor",
+            "//tensorflow/core/common_runtime/eager:execute",
+            "//tensorflow/core/common_runtime/eager:execute_node",
             "//tensorflow/core/common_runtime/eager:kernel_and_device",
+            "//tensorflow/core/common_runtime/eager:tensor_handle",
+            "//tensorflow/core/common_runtime/eager:copy_to_device_node",
             "//tensorflow/core:core_cpu_internal",
             "//tensorflow/core:framework",
             "//tensorflow/core:framework_internal",
@@ -68,6 +72,7 @@ tf_cuda_library(
         "//tensorflow/core/common_runtime/eager:context",
         "//tensorflow/core/common_runtime/eager:eager_executor",
         "//tensorflow/core/common_runtime/eager:kernel_and_device",
+        "//tensorflow/core/common_runtime/eager:tensor_handle",
     ],
 )
 

@@ -2528,13 +2528,13 @@ tf_kernel_library(
 tf_kernel_library(
     name = "self_adjoint_eig_op",
     prefix = "self_adjoint_eig_op",
-    deps = LINALG_DEPS,
+    deps = LINALG_DEPS + ["//tensorflow/core:lib_internal"],
 )
 
 tf_kernel_library(
     name = "self_adjoint_eig_v2_op",
     prefix = "self_adjoint_eig_v2_op",
-    deps = LINALG_DEPS + if_cuda([
+    deps = LINALG_DEPS + ["//tensorflow/core:lib_internal"] + if_cuda([
         ":cast_op",
         ":cwise_op",
     ]),
@@ -5959,6 +5959,7 @@ tf_mkl_kernel_library(
         "//tensorflow/core:lib_internal",
         "//tensorflow/core:nn_ops_op_lib",
         "//third_party/mkl:intel_binary_blob",
+        "@mkl_dnn",
     ],
 )
 
@@ -5979,6 +5980,7 @@ tf_mkl_kernel_library(
         "//tensorflow/core:lib_internal",
         "//tensorflow/core:nn_ops_op_lib",
         "//third_party/mkl:intel_binary_blob",
+        "@mkl_dnn",
     ],
 )
 
@@ -6010,6 +6012,7 @@ tf_mkl_kernel_library(
         "//tensorflow/core:lib",
         "//tensorflow/core:lib_internal",
         "//tensorflow/core:nn_ops_op_lib",
+        "//third_party/eigen3",
         "//third_party/mkl:intel_binary_blob",
         "@mkl_dnn",
     ],
@@ -6029,6 +6032,7 @@ tf_mkl_kernel_library(
     prefix = "mkl_aggregate_ops",
     deps = MATH_DEPS + [
         "//third_party/mkl:intel_binary_blob",
+        "@mkl_dnn",
     ],
 )
 
@@ -6046,6 +6050,7 @@ tf_mkl_kernel_library(
     prefix = "mkl_reshape_op",
     deps = ARRAY_DEPS + [
         "//third_party/mkl:intel_binary_blob",
+        "@mkl_dnn",
     ],
 )
 
@@ -6088,6 +6093,13 @@ cc_library(
     deps = [
         "//tensorflow/core:framework",
         "//tensorflow/core:lib",
+    ],
+)
+
+tf_kernel_library(
+    name = "boosted_trees_ops",
+    deps = [
+        "//tensorflow/core/kernels/boosted_trees:boosted_trees_ops",
     ],
 )
 
@@ -6141,18 +6153,6 @@ tf_kernel_library(
 
 # -----------------------------------------------------------------------------
 # Google-internal targets.  These must be at the end for syncrepo.
-
-filegroup(
-    name = "all_files",
-    srcs = glob(
-        ["**/*"],
-        exclude = [
-            "**/METADATA",
-            "**/OWNERS",
-        ],
-    ),
-    visibility = ["//tensorflow:__subpackages__"],
-)
 
 # Library to link with when compiling the cwise_op kernels directly,
 # e.g. for selective registration.

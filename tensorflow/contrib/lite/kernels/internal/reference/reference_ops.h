@@ -957,8 +957,18 @@ template <FusedActivationFunctionType Ac>
 inline void Add(const int16* input1_data, const Dims<4>& input1_dims,
                 int input1_shift, const int16* input2_data,
                 const Dims<4>& input2_dims, int input2_shift,
+                int16 output_activation_min, int16 output_activation_max,
                 int16* output_data, const Dims<4>& output_dims) {
-  static_assert(Ac == FusedActivationFunctionType::kNone, "");
+  static_assert(Ac == FusedActivationFunctionType::kNone ||
+                    Ac == FusedActivationFunctionType::kRelu ||
+                    Ac == FusedActivationFunctionType::kRelu6 ||
+                    Ac == FusedActivationFunctionType::kRelu1,
+                "");
+  TFLITE_DCHECK_LE(output_activation_min, output_activation_max);
+  if (Ac == FusedActivationFunctionType::kNone) {
+    TFLITE_DCHECK_EQ(output_activation_min, -32768);
+    TFLITE_DCHECK_EQ(output_activation_max, 32767);
+  }
 
   const int flat_size = RequiredBufferSizeForDims(output_dims);
   TFLITE_DCHECK_EQ(RequiredBufferSizeForDims(input1_dims), flat_size);
@@ -979,7 +989,10 @@ inline void Add(const int16* input1_data, const Dims<4>& input1_dims,
     F0 scaled_input =
         F0::FromRaw(gemmlowp::RoundingDivideByPOT(shift_input[i], input_shift));
     F0 result = gemmlowp::SaturatingAdd(scaled_input, input_ready_scaled);
-    output_data[i] = result.raw();
+    const int16 raw_output = result.raw();
+    const int16 clamped_output = std::min(
+        output_activation_max, std::max(output_activation_min, raw_output));
+    output_data[i] = clamped_output;
   }
 }
 
@@ -3171,19 +3184,20 @@ inline void Exp(const T* input_data, const size_t num_elements,
   }
 }
 
-template <typename T>
-inline void Mean(T* input_data, const int* input_dims, const int input_num_dims,
+template <typename T, typename U>
+inline bool Mean(T* input_data, const int* input_dims, const int input_num_dims,
                  T* output_data, const int* output_dims,
                  const int output_num_dims, const int* axis,
                  const int num_axis_dimensions, bool keep_dims, int* temp_index,
-                 int* resolved_axis) {
+                 int* resolved_axis, U* temp_sum) {
   // resets output data.
   size_t num_outputs = 1;
   for (int idx = 0; idx < output_num_dims; ++idx) {
     num_outputs *= static_cast<size_t>(output_dims[idx]);
   }
   for (size_t idx = 0; idx < num_outputs; ++idx) {
-    output_data[idx] = 0;
+    output_data[idx] = T();
+    temp_sum[idx] = U();
   }
   // resets temp index.
   for (int idx = 0; idx < input_num_dims; ++idx) {
@@ -3216,19 +3230,24 @@ inline void Mean(T* input_data, const int* input_dims, const int input_num_dims,
     size_t output_offset =
         ReducedOutputOffset(input_num_dims, input_dims, temp_index,
                             num_resolved_axis, resolved_axis);
-    output_data[output_offset] += input_data[input_offset];
+    temp_sum[output_offset] += static_cast<U>(input_data[input_offset]);
   }
   // takes average by num of elements added to get mean.
   size_t num_elements_in_axis = 1;
   for (int idx = 0; idx < num_resolved_axis; ++idx) {
-    num_elements_in_axis *= static_cast<size_t>(input_dims[resolved_axis[idx]]);
+    size_t current = static_cast<size_t>(input_dims[resolved_axis[idx]]);
+    if (current > (std::numeric_limits<U>::max() / num_elements_in_axis)) {
+      return false;
+    }
+    num_elements_in_axis *= current;
   }
   if (num_elements_in_axis > 0) {
     for (size_t idx = 0; idx < num_outputs; ++idx) {
-      output_data[idx] = static_cast<T>(static_cast<float>(output_data[idx]) /
-                                        num_elements_in_axis);
+      output_data[idx] =
+          static_cast<T>(temp_sum[idx] / static_cast<U>(num_elements_in_axis));
     }
   }
+  return true;
 }
 
 template <typename T>
