@@ -165,8 +165,12 @@ struct LaunchXsmmBackwardInputConvolution<CPUDevice, float> {
         LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM;  // LIBXSMM_DNN_TENSOR_FORMAT_RSCK;
     desc.fuse_ops = LIBXSMM_DNN_CONV_FUSE_NONE;
     desc.options = LIBXSMM_DNN_CONV_OPTION_WU_EXT_FILTER_REDUCE_OVERWRITE;
+# if LIBXSMM_VERSION2(1, 9) < LIBXSMM_VERSION2(LIBXSMM_VERSION_MAJOR, LIBXSMM_VERSION_MINOR)
+    desc.datatype_out = LIBXSMM_DNN_DATATYPE_F32;
+    desc.datatype_in = LIBXSMM_DNN_DATATYPE_F32;
+#else
     desc.datatype = LIBXSMM_DNN_DATATYPE_F32;
-
+#endif
     auto input_ptr = input_backward.data();
     auto filter_ptr = kernel.data();
     auto output_ptr = output_backward.data();

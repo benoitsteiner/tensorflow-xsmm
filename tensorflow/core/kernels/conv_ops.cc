@@ -235,8 +235,12 @@ class LaunchXsmmConvOp<CPUDevice, float> {
     desc.filter_format = LIBXSMM_DNN_TENSOR_FORMAT_LIBXSMM;
     desc.fuse_ops = LIBXSMM_DNN_CONV_FUSE_NONE;
     desc.options = LIBXSMM_DNN_CONV_OPTION_WU_EXT_FILTER_REDUCE_OVERWRITE;
+# if LIBXSMM_VERSION2(1, 9) < LIBXSMM_VERSION2(LIBXSMM_VERSION_MAJOR, LIBXSMM_VERSION_MINOR)
+    desc.datatype_out = LIBXSMM_DNN_DATATYPE_F32;
+    desc.datatype_in = LIBXSMM_DNN_DATATYPE_F32;
+#else
     desc.datatype = LIBXSMM_DNN_DATATYPE_F32;
-
+#endif
     if (dilation_rows != 1 || dilation_cols != 1 ||
         !CanUseXsmmConv2D(desc, data_format)) {
       return false;
