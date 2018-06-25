@@ -138,6 +138,9 @@ class DfsHloVisitorBase {
   virtual Status HandleExp(HloInstructionPtr hlo) {
     return HandleElementwiseUnary(hlo);
   }
+  virtual Status HandleExpm1(HloInstructionPtr hlo) {
+    return HandleElementwiseUnary(hlo);
+  }
   virtual Status HandleFloor(HloInstructionPtr hlo) {
     return HandleElementwiseUnary(hlo);
   }
@@ -145,6 +148,12 @@ class DfsHloVisitorBase {
     return HandleElementwiseUnary(hlo);
   }
   virtual Status HandleLog(HloInstructionPtr hlo) {
+    return HandleElementwiseUnary(hlo);
+  }
+  virtual Status HandleClz(HloInstructionPtr hlo) {
+    return HandleElementwiseUnary(hlo);
+  }
+  virtual Status HandleLog1p(HloInstructionPtr hlo) {
     return HandleElementwiseUnary(hlo);
   }
   virtual Status HandleCos(HloInstructionPtr hlo) {
@@ -174,6 +183,9 @@ class DfsHloVisitorBase {
   virtual Status HandleOr(HloInstructionPtr hlo) {
     return HandleElementwiseBinary(hlo);
   }
+  virtual Status HandleXor(HloInstructionPtr hlo) {
+    return HandleElementwiseBinary(hlo);
+  }
   virtual Status HandleShiftLeft(HloInstructionPtr hlo) {
     return HandleElementwiseBinary(hlo);
   }
@@ -188,6 +200,10 @@ class DfsHloVisitorBase {
     return HandleElementwiseUnary(hlo);
   }
 
+  virtual Status HandleDomain(HloInstructionPtr hlo) {
+    return HandleElementwiseUnary(hlo);
+  }
+
   virtual Status HandleInfeed(HloInstructionPtr hlo) = 0;
   virtual Status HandleOutfeed(HloInstructionPtr hlo) = 0;
   virtual Status HandleHostCompute(HloInstructionPtr hlo) = 0;
@@ -199,7 +215,6 @@ class DfsHloVisitorBase {
   virtual Status HandleReduce(HloInstructionPtr hlo) = 0;
   virtual Status HandleBitcast(HloInstructionPtr hlo) = 0;
   virtual Status HandleBroadcast(HloInstructionPtr hlo) = 0;
-  virtual Status HandleBroadcastDimOne(HloInstructionPtr hlo) = 0;
   virtual Status HandleReshape(HloInstructionPtr hlo) = 0;
   virtual Status HandleTranspose(HloInstructionPtr hlo) = 0;
   virtual Status HandleParameter(HloInstructionPtr hlo) = 0;
@@ -230,6 +245,8 @@ class DfsHloVisitorBase {
   virtual Status HandleBatchNormInference(HloInstructionPtr hlo) = 0;
 
   virtual Status HandleBatchNormGrad(HloInstructionPtr hlo) = 0;
+
+  virtual Status HandleGenerateToken(HloInstructionPtr token) = 0;
 
   // Invoked to inform the visitor that the traversal has completed, and that
   // the root was "root".

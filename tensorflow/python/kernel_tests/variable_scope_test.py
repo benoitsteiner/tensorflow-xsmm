@@ -40,6 +40,7 @@ from tensorflow.python.ops import state_ops
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.ops import variables as variables_lib
 from tensorflow.python.platform import test
+from tensorflow.python.util import compat
 
 
 class VariableScopeTest(test.TestCase):
@@ -56,7 +57,7 @@ class VariableScopeTest(test.TestCase):
     v1 = vs.get_variable("v", [1])
     self.assertEqual(v, v1)
 
-  @test_util.run_in_graph_and_eager_modes()
+  @test_util.run_in_graph_and_eager_modes
   def testResource(self):
     vs = variable_scope._get_default_variable_store()
     v1 = vs.get_variable("v", [1], use_resource=True)
@@ -86,7 +87,7 @@ class VariableScopeTest(test.TestCase):
     self.assertEqual(
         set(expected_names), set([v.name for v in vs._vars.values()]))
 
-  @test_util.run_in_graph_and_eager_modes()
+  @test_util.run_in_graph_and_eager_modes
   def testVarScopeInitializer(self):
     init = init_ops.constant_initializer(0.3)
     with variable_scope.variable_scope("tower0") as tower:
@@ -99,7 +100,7 @@ class VariableScopeTest(test.TestCase):
         self.evaluate(variables_lib.variables_initializer([w]))
         self.assertAllClose(self.evaluate(w.value()), 0.3)
 
-  @test_util.run_in_graph_and_eager_modes()
+  @test_util.run_in_graph_and_eager_modes
   def testVarScopeConstraint(self):
     constraint = lambda x: 0. * x
     with variable_scope.variable_scope("tower1") as tower:
@@ -110,7 +111,13 @@ class VariableScopeTest(test.TestCase):
         w = variable_scope.get_variable("w", [])
         self.assertEqual(w.constraint, constraint)
 
-  @test_util.run_in_graph_and_eager_modes()
+  def testStringDefaultInitializer(self):
+    with self.test_session():
+      v = variable_scope.get_variable("string", shape=[], dtype=dtypes.string)
+      variables_lib.global_variables_initializer().run()
+      self.assertAllEqual(compat.as_bytes(v.eval()), b"")
+
+  @test_util.run_in_graph_and_eager_modes
   def testVarScopeDType(self):
     with variable_scope.variable_scope("tower2") as tower:
       with variable_scope.variable_scope("foo", dtype=dtypes.float16):
@@ -190,7 +197,33 @@ class VariableScopeTest(test.TestCase):
         self.assertAllEqual([v1, v2], [v3, v4])
       f()
 
-  @test_util.run_in_graph_and_eager_modes()
+  @test_util.run_in_graph_and_eager_modes
+  def testEagerVariablesStoreAddsToCollections(self):
+    store = variable_scope.EagerVariableStore()
+    with store.as_default():
+      trainable = variable_scope.get_variable("v1", [], trainable=True)
+      not_trainable = variable_scope.get_variable("v2", [], trainable=False)
+      concat = variable_scope.get_variable(
+          "v3", [], collections=[ops.GraphKeys.CONCATENATED_VARIABLES])
+      self.assertEqual(
+          ops.get_collection(ops.GraphKeys.GLOBAL_VARIABLES),
+          [trainable, not_trainable])
+      self.assertEqual(
+          ops.get_collection(ops.GraphKeys.TRAINABLE_VARIABLES),
+          [trainable, concat])
+      self.assertEqual(
+          ops.get_collection(ops.GraphKeys.CONCATENATED_VARIABLES), [concat])
+
+  @test_util.run_in_graph_and_eager_modes
+  def testEagerVariablesOutsideStoreNotAddedToCollections(self):
+    if not context.executing_eagerly():
+      return
+    variable_scope.get_variable("v1", [], trainable=True)
+    variable_scope.get_variable("v2", [], trainable=False)
+    self.assertFalse(ops.get_collection(ops.GraphKeys.GLOBAL_VARIABLES))
+    self.assertFalse(ops.get_collection(ops.GraphKeys.TRAINABLE_VARIABLES))
+
+  @test_util.run_in_graph_and_eager_modes
   def testInitFromNonTensorValue(self):
     v = variable_scope.get_variable("v4", initializer=4, dtype=dtypes.int32)
     self.evaluate(variables_lib.variables_initializer([v]))
@@ -206,7 +239,7 @@ class VariableScopeTest(test.TestCase):
     with self.assertRaises(error):
       variable_scope.get_variable("x4", initializer={})
 
-  @test_util.run_in_graph_and_eager_modes()
+  @test_util.run_in_graph_and_eager_modes
   def testInitFromNonInitializer(self):
     # Test various dtypes with zeros initializer as following:
     types = [
@@ -261,7 +294,7 @@ class VariableScopeTest(test.TestCase):
         v_tower = variable_scope.get_variable("v", [])
         self.assertFalse(v_tower.value().device.startswith(caching_device))
 
-  @test_util.run_in_graph_and_eager_modes()
+  @test_util.run_in_graph_and_eager_modes
   def testVarScopeRegularizer(self):
     init = init_ops.constant_initializer(0.3)
 
@@ -306,7 +339,7 @@ class VariableScopeTest(test.TestCase):
           losses = ops.get_collection(ops.GraphKeys.REGULARIZATION_LOSSES)
           self.assertEqual(3, len(losses))  # No new loss added.
 
-  @test_util.run_in_graph_and_eager_modes()
+  @test_util.run_in_graph_and_eager_modes
   def testInitializeFromValue(self):
     init = constant_op.constant(0.1)
     w = variable_scope.get_variable("v", initializer=init)
@@ -395,7 +428,7 @@ class VariableScopeTest(test.TestCase):
       sess.run(v0.initializer)
       sess.run(add)
 
-  @test_util.run_in_graph_and_eager_modes()
+  @test_util.run_in_graph_and_eager_modes
   def testGetVariableScope(self):
     # Test the get_variable_scope() function and setting properties of result.
     init = init_ops.constant_initializer(0.3)
@@ -416,7 +449,7 @@ class VariableScopeTest(test.TestCase):
     new_init = variable_scope.get_variable_scope().initializer
     self.assertEqual(new_init, None)
 
-  @test_util.run_in_graph_and_eager_modes()
+  @test_util.run_in_graph_and_eager_modes
   def testVarScope(self):
     with variable_scope.variable_scope("tower4") as tower:
       self.assertEqual(tower.name, "tower4")
@@ -435,7 +468,7 @@ class VariableScopeTest(test.TestCase):
         with ops.name_scope("scope") as sc:
           self.assertEqual(sc, "tower6/tower4/scope/")
 
-  @test_util.run_in_graph_and_eager_modes()
+  @test_util.run_in_graph_and_eager_modes
   def testVarScopeNameScope(self):
     with ops.name_scope("testVarScopeNameScope1"):
       with variable_scope.variable_scope("tower") as tower:
@@ -928,7 +961,7 @@ class VariableScopeTest(test.TestCase):
             self.assertEqual(
                 constant_op.constant([], name="c").name, "another/inner/c:0")
 
-  @test_util.run_in_graph_and_eager_modes()
+  @test_util.run_in_graph_and_eager_modes
   def testGetLocalVar(self):
     # Check that local variable respects naming.
     with variable_scope.variable_scope("outer") as outer:

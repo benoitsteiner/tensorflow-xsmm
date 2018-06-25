@@ -158,9 +158,6 @@ class DfsHloVisitorWithDefaultBase
   Status HandleBroadcast(HloInstructionPtr broadcast) override {
     return DefaultAction(broadcast);
   }
-  Status HandleBroadcastDimOne(HloInstructionPtr broadcastDimOne) override {
-    return DefaultAction(broadcastDimOne);
-  }
   Status HandlePad(HloInstructionPtr pad) override {
     return DefaultAction(pad);
   }
@@ -190,6 +187,9 @@ class DfsHloVisitorWithDefaultBase
   }
   Status HandleGather(HloInstructionPtr gather) override {
     return DefaultAction(gather);
+  }
+  Status HandleGenerateToken(HloInstructionPtr token) override {
+    return DefaultAction(token);
   }
 
   // Invoked to inform the visitor that the traversal has completed, and that

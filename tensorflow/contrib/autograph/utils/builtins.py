@@ -24,25 +24,25 @@ import six
 
 from tensorflow.contrib.autograph.utils import py_func
 from tensorflow.contrib.autograph.utils import type_check
+from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import tensor_util
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import logging_ops
 from tensorflow.python.ops import math_ops
-from tensorflow.python.util import tf_inspect
 
 
 def dynamic_builtin(f, *args, **kwargs):
   """Converts a builtin function call inline."""
-  # Some built-ins may be objects.
-  if not tf_inspect.isbuiltin(f) and f not in (range,):
-    return f(*args, **kwargs)
-
   if f is len:
     return dynamic_len(*args, **kwargs)
   if six.PY2 and f is xrange:
     return dynamic_range(*args, **kwargs)
   if f is range:
     return dynamic_range(*args, **kwargs)
+  if f is int:
+    return dynamic_int(*args, **kwargs)
+  if f is float:
+    return dynamic_float(*args, **kwargs)
 
   raise NotImplementedError(
       'The "%s" builtin is not yet supported.' % f.__name__)
@@ -57,6 +57,20 @@ def dynamic_len(list_or_tensor):
           'len requires non-zero rank for tensor "%s"' % list_or_tensor)
     return array_ops.shape(list_or_tensor)[0]
   return len(list_or_tensor)
+
+
+def dynamic_int(num_or_tensor, **kwargs):
+  """Implementation of int() using dynamic dispatch."""
+  if tensor_util.is_tensor(num_or_tensor):
+    return math_ops.cast(num_or_tensor, dtype=dtypes.int32, **kwargs)
+  return int(num_or_tensor)
+
+
+def dynamic_float(num_or_tensor, **kwargs):
+  """Implementation of float() using dynamic dispatch."""
+  if tensor_util.is_tensor(num_or_tensor):
+    return math_ops.cast(num_or_tensor, dtype=dtypes.float32, **kwargs)
+  return float(num_or_tensor)
 
 
 def dynamic_range(start_or_stop, stop=None, step=None):
@@ -98,9 +112,15 @@ def dynamic_print(*values):
   if all(map(is_tf_print_compatible, values)):
     return logging_ops.Print(1, values)
 
-  def flushed_print(*vals):
+  def print_wrapper(*vals):
+    if six.PY3:
+      # TensorFlow doesn't seem to generate Unicode when passing strings to
+      # py_func. This causes the print to add a "b'" wrapper to the output,
+      # which is probably never what you want.
+      vals = tuple(v.decode() if isinstance(v, bytes) else v for v in vals)
     print(*vals)
+    # The flush helps avoid garbled output in IPython.
     sys.stdout.flush()
 
   return py_func.wrap_py_func(
-      flushed_print, None, values, use_dummy_return=True)
+      print_wrapper, None, values, use_dummy_return=True)

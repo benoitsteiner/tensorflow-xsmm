@@ -95,9 +95,9 @@ class HloCostAnalysis : public ConstDfsHloVisitor {
   Status HandleSelectAndScatter(const HloInstruction* instruction) override;
   Status HandleBitcast(const HloInstruction* bitcast) override;
   Status HandleBroadcast(const HloInstruction* broadcast) override;
-  Status HandleBroadcastDimOne(const HloInstruction* broadcastDimOne) override;
   Status HandlePad(const HloInstruction* pad) override;
   Status HandleReshape(const HloInstruction* reshape) override;
+  Status HandleGenerateToken(const HloInstruction* token) override;
   Status HandleTranspose(const HloInstruction* transpose) override;
   Status HandleWhile(const HloInstruction* xla_while) override;
   Status HandleConditional(const HloInstruction* conditional) override;

@@ -57,10 +57,10 @@ from tensorflow.python.training import moving_averages
 __all__ = [
     'avg_pool2d', 'avg_pool3d', 'batch_norm', 'bias_add', 'conv2d', 'conv3d',
     'conv2d_in_plane', 'conv2d_transpose', 'conv3d_transpose', 'convolution',
-    'convolution2d', 'convolution2d_in_plane', 'convolution2d_transpose',
-    'convolution3d', 'convolution3d_transpose', 'dense_to_sparse',
-    'dropout', 'elu', 'flatten', 'fully_connected', 'GDN', 'gdn',
-    'images_to_sequence', 'layer_norm', 'linear', 'pool', 'max_pool2d',
+    'convolution1d', 'convolution2d', 'convolution2d_in_plane',
+    'convolution2d_transpose', 'convolution3d', 'convolution3d_transpose',
+    'dense_to_sparse', 'dropout', 'elu', 'flatten', 'fully_connected', 'GDN',
+    'gdn', 'images_to_sequence', 'layer_norm', 'linear', 'pool', 'max_pool2d',
     'max_pool3d', 'one_hot_encoding', 'relu', 'relu6', 'repeat',
     'scale_gradient', 'separable_conv2d', 'separable_convolution2d',
     'sequence_to_images', 'softmax', 'spatial_softmax', 'stack', 'unit_norm',
@@ -1536,6 +1536,7 @@ def convolution3d_transpose(
 @add_arg_scope
 def dense_to_sparse(tensor, eos_token=0, outputs_collections=None, scope=None):
   """Converts a dense tensor into a sparse tensor.
+
   An example use would be to convert dense labels to sparse ones
   so that they can be fed to the ctc_loss.
 
@@ -2021,6 +2022,7 @@ class GDN(base.Layer):
 
     def beta_initializer(shape, dtype=None, partition_info=None):
       del partition_info  # unused
+      pedestal = array_ops.constant(self._reparam_offset**2, dtype=self.dtype)
       return math_ops.sqrt(array_ops.ones(shape, dtype=dtype) + pedestal)
 
     def gamma_initializer(shape, dtype=None, partition_info=None):
@@ -2028,6 +2030,7 @@ class GDN(base.Layer):
       assert len(shape) == 2
       assert shape[0] == shape[1]
       eye = linalg_ops.eye(shape[0], dtype=dtype)
+      pedestal = array_ops.constant(self._reparam_offset**2, dtype=self.dtype)
       return math_ops.sqrt(self._gamma_init * eye + pedestal)
 
     beta = self.add_variable(
@@ -2323,11 +2326,16 @@ def images_to_sequence(inputs,
                        outputs_collections=None,
                        scope=None):
   """Convert a batch of images into a batch of sequences.
+
   Args:
     inputs: a (num_images, height, width, depth) tensor
     data_format: A string. `NHWC` (default) and `NCHW` are supported.
     outputs_collections: The collections to which the outputs are added.
     scope: Optional scope for name_scope.
+
+  Raises:
+     ValueError: If `data_format` is not either NCHW or NHWC.
+
   Returns:
     (width, num_images*height, depth) sequence tensor
   """
@@ -2656,6 +2664,7 @@ def separable_convolution2d(
     normalizer_fn=None,
     normalizer_params=None,
     weights_initializer=initializers.xavier_initializer(),
+    pointwise_initializer=None,
     weights_regularizer=None,
     biases_initializer=init_ops.zeros_initializer(),
     biases_regularizer=None,
@@ -2697,7 +2706,9 @@ def separable_convolution2d(
       `biases_regularizer` are ignored and `biases` are not created nor added.
       default set to None for no normalizer function
     normalizer_params: Normalization function parameters.
-    weights_initializer: An initializer for the weights.
+    weights_initializer: An initializer for the depthwise weights.
+    pointwise_initializer: An initializer for the pointwise weights.
+      default set to None, means use weights_initializer.
     weights_regularizer: Optional regularizer for the weights.
     biases_initializer: An initializer for the biases. If None skip biases.
     biases_regularizer: Optional regularizer for the biases.
@@ -2729,6 +2740,9 @@ def separable_convolution2d(
       custom_getter=layer_variable_getter) as sc:
     inputs = ops.convert_to_tensor(inputs)
 
+    if pointwise_initializer is None:
+      pointwise_initializer = weights_initializer
+
     df = ('channels_first'
           if data_format and data_format.startswith('NC') else 'channels_last')
     if num_outputs is not None:
@@ -2744,7 +2758,7 @@ def separable_convolution2d(
           depth_multiplier=depth_multiplier,
           use_bias=not normalizer_fn and biases_initializer,
           depthwise_initializer=weights_initializer,
-          pointwise_initializer=weights_initializer,
+          pointwise_initializer=pointwise_initializer,
           bias_initializer=biases_initializer,
           depthwise_regularizer=weights_regularizer,
           pointwise_regularizer=weights_regularizer,
@@ -2833,6 +2847,7 @@ def sequence_to_images(inputs,
                        outputs_collections=None,
                        scope=None):
   """Convert a batch of sequences into a batch of images.
+
   Args:
     inputs: (num_steps, num_batches, depth) sequence tensor
     height: the height of the images
@@ -2840,6 +2855,7 @@ def sequence_to_images(inputs,
       Currently supports `'channels_first'` and `'channels_last'`.
     outputs_collections: The collections to which the outputs are added.
     scope: Optional scope for name_scope.
+
   Returns:
     A tensor representing the output of the operation.
   """
@@ -2849,7 +2865,7 @@ def sequence_to_images(inputs,
     if num_batches is None:
       num_batches = -1
     else:
-      num_batches = num_batches // height
+      num_batches //= height
     reshaped = array_ops.reshape(inputs,
                                  [width, num_batches, height, depth])
     if output_data_format == 'channels_first':

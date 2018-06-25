@@ -37,20 +37,25 @@ def src_to_test_name(src):
 def full_path(relative_paths):
   return [native.package_name() + "/" + relative for relative in relative_paths]
 
+def _add_tfcore_prefix(src):
+  if src.startswith("//"):
+    return src
+  return "//tensorflow/core:" + src
+
 # List of proto files for android builds
 def tf_android_core_proto_sources(core_proto_sources_relative):
   return [
-      "//tensorflow/core:" + p for p in core_proto_sources_relative
+      _add_tfcore_prefix(p) for p in core_proto_sources_relative
   ]
 
 # Returns the list of pb.h and proto.h headers that are generated for
 # tf_android_core_proto_sources().
 def tf_android_core_proto_headers(core_proto_sources_relative):
   return ([
-      "//tensorflow/core/" + p.replace(".proto", ".pb.h")
+      _add_tfcore_prefix(p).replace(":", "/").replace(".proto", ".pb.h")
       for p in core_proto_sources_relative
   ] + [
-      "//tensorflow/core/" + p.replace(".proto", ".proto.h")
+      _add_tfcore_prefix(p).replace(":", "/").replace(".proto", ".proto.h")
       for p in core_proto_sources_relative
   ])
 
@@ -235,6 +240,9 @@ def tf_opts_nortti_if_android():
   ])
 
 # LINT.ThenChange(//tensorflow/contrib/android/cmake/CMakeLists.txt)
+
+def tf_features_nomodules_if_android():
+  return if_android(["-use_header_modules"])
 
 # Given a list of "op_lib_names" (a list of files in the ops directory
 # without their .cc extensions), generate a library for that file.
@@ -504,7 +512,9 @@ def tf_gen_op_wrappers_cc(name,
 #   hidden: Optional list of ops names to make private in the Python module.
 #     It is invalid to specify both "hidden" and "op_whitelist".
 #   visibility: passed to py_library.
-#   deps: list of dependencies for the generated target.
+#   deps: list of dependencies for the intermediate tool used to generate the
+#     python target. NOTE these `deps` are not applied to the final python
+#     library target itself.
 #   require_shape_functions: leave this as False.
 #   hidden_file: optional file that contains a list of op names to make private
 #     in the generated Python module. Each op name should be on a line by
@@ -912,6 +922,7 @@ def tf_gpu_kernel_library(srcs,
                           hdrs=[],
                           **kwargs):
   copts = copts + _cuda_copts() + if_cuda(cuda_copts) + tf_copts()
+  kwargs["features"] = kwargs.get("features", []) + ["-use_header_modules"]
 
   native.cc_library(
       srcs=srcs,
@@ -952,15 +963,7 @@ def tf_cuda_library(deps=None, cuda_deps=None, copts=tf_copts(), **kwargs):
   if not cuda_deps:
     cuda_deps = []
 
-  if 'linkstatic' not in kwargs or kwargs['linkstatic'] != 1:
-    enable_text_relocation_linkopt = select({
-          clean_dep("//tensorflow:darwin"): [],
-          clean_dep("//tensorflow:windows"): [],
-          "//conditions:default": ['-Wl,-z,notext'],})
-    if 'linkopts' in kwargs:
-      kwargs['linkopts'] += enable_text_relocation_linkopt
-    else:
-      kwargs['linkopts'] = enable_text_relocation_linkopt
+  kwargs["features"] = kwargs.get("features", []) + ["-use_header_modules"]
   native.cc_library(
       deps=deps + if_cuda(cuda_deps + [
           clean_dep("//tensorflow/core:cuda"),
@@ -1302,7 +1305,8 @@ def tf_custom_op_library(name, srcs=[], gpu_srcs=[], deps=[], linkopts=[]):
     native.cc_library(
         name=basename + "_gpu",
         srcs=gpu_srcs,
-        copts=_cuda_copts(),
+        copts=_cuda_copts() + if_tensorrt(["-DGOOGLE_TENSORRT=1"]),
+        features = if_cuda(["-use_header_modules"]),
         deps=deps + if_cuda(cuda_deps))
     cuda_deps.extend([":" + basename + "_gpu"])
 
@@ -1354,12 +1358,6 @@ register_extension_info(
     extension_name = "tf_custom_op_py_library",
     label_regex_for_dep = "{extension_name}",
 )
-
-def tf_extension_linkopts():
-  return []  # No extension link opts
-
-def tf_extension_copts():
-  return []  # No extension c opts
 
 # In tf_py_wrap_cc generated libraries
 # module init functions are not exported unless
@@ -1438,13 +1436,13 @@ def tf_py_wrap_cc(name,
   extra_linkopts = select({
       "@local_config_cuda//cuda:darwin": [
           "-Wl,-exported_symbols_list",
-          "%s.lds"%vscriptname,
+          "$(location %s.lds)"%vscriptname,
       ],
       clean_dep("//tensorflow:windows"): [],
       clean_dep("//tensorflow:windows_msvc"): [],
       "//conditions:default": [
           "-Wl,--version-script",
-          "%s.lds"%vscriptname,
+          "$(location %s.lds)"%vscriptname,
       ]
   })
   extra_deps += select({
@@ -1461,10 +1459,10 @@ def tf_py_wrap_cc(name,
   tf_cc_shared_object(
       name=cc_library_name,
       srcs=[module_name + ".cc"],
-      copts=(copts + if_not_windows([
+      copts=copts + if_not_windows([
           "-Wno-self-assign", "-Wno-sign-compare", "-Wno-write-strings"
-      ]) + tf_extension_copts()),
-      linkopts=tf_extension_linkopts() + extra_linkopts,
+      ]),
+      linkopts=extra_linkopts,
       linkstatic=1,
       deps=deps + extra_deps,
       **kwargs)
@@ -1485,7 +1483,7 @@ def tf_py_wrap_cc(name,
 # This macro is for running python tests against system installed pip package
 # on Windows.
 #
-# py_test is built as an exectuable python zip file on Windows, which contains all
+# py_test is built as an executable python zip file on Windows, which contains all
 # dependencies of the target. Because of the C++ extensions, it would be very
 # inefficient if the py_test zips all runfiles, plus we don't need them when running
 # tests against system installed pip package. So we'd like to get rid of the deps
@@ -1500,6 +1498,7 @@ def tf_py_wrap_cc(name,
 # 2. When --define=no_tensorflow_py_deps=false (by default), it's a normal py_test.
 def py_test(deps=[], data=[], **kwargs):
   native.py_test(
+      # TODO(jlebar): Ideally we'd use tcmalloc here.,
       deps=select({
           "//conditions:default": deps,
           clean_dep("//tensorflow:no_tensorflow_py_deps"): [],
@@ -1672,22 +1671,36 @@ def cuda_py_tests(name,
 #
 # Return a struct with fields (hdrs, srcs) containing the names of the
 # generated files.
-def tf_generate_proto_text_sources(name, srcs_relative_dir, srcs):
+def tf_generate_proto_text_sources(name, srcs_relative_dir, srcs, protodeps=[], deps=[], visibility=None):
   out_hdrs = (
       [p.replace(".proto", ".pb_text.h")
        for p in srcs] + [p.replace(".proto", ".pb_text-impl.h") for p in srcs])
   out_srcs = [p.replace(".proto", ".pb_text.cc") for p in srcs]
   native.genrule(
-      name=name,
-      srcs=srcs + [clean_dep("//tensorflow/tools/proto_text:placeholder.txt")],
+      name=name + "_srcs",
+      srcs=srcs + protodeps + [clean_dep("//tensorflow/tools/proto_text:placeholder.txt")],
       outs=out_hdrs + out_srcs,
+      visibility=visibility,
       cmd=
       "$(location //tensorflow/tools/proto_text:gen_proto_text_functions) "
       + "$(@D) " + srcs_relative_dir + " $(SRCS)",
       tools=[
           clean_dep("//tensorflow/tools/proto_text:gen_proto_text_functions")
       ],)
-  return struct(hdrs=out_hdrs, srcs=out_srcs)
+
+  native.filegroup(
+      name=name + "_hdrs",
+      srcs=out_hdrs,
+      visibility=visibility,
+  )
+
+  native.cc_library(
+      name=name,
+      srcs=out_srcs,
+      hdrs=out_hdrs,
+      visibility=visibility,
+      deps = deps,
+  )
 
 def tf_genrule_cmd_append_to_srcs(to_append):
   return ("cat $(SRCS) > $(@) && " + "echo >> $(@) && " + "echo " + to_append +
@@ -1703,7 +1716,7 @@ def tf_version_info_genrule():
       ],
       outs=["util/version_info.cc"],
       cmd=
-      "$(location //tensorflow/tools/git:gen_git_source.py) --generate $(SRCS) \"$@\"",
+      "$(location //tensorflow/tools/git:gen_git_source.py) --generate $(SRCS) \"$@\" --git_tag_override=$${GIT_TAG_OVERRIDE:-}",
       local=1,
       tools=[clean_dep("//tensorflow/tools/git:gen_git_source.py")],)
 
@@ -1712,7 +1725,7 @@ def tf_py_build_info_genrule():
       name="py_build_info_gen",
       outs=["platform/build_info.py"],
       cmd=
-      "$(location //tensorflow/tools/build_info:gen_build_info.py) --raw_generate \"$@\" --build_config " + if_cuda("cuda", "cpu"),
+     "$(location //tensorflow/tools/build_info:gen_build_info.py) --raw_generate \"$@\" --build_config " + if_cuda("cuda", "cpu"),
       local=1,
       tools=[clean_dep("//tensorflow/tools/build_info:gen_build_info.py")],)
 

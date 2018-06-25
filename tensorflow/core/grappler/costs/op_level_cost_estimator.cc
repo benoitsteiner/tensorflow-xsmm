@@ -27,17 +27,25 @@ namespace grappler {
 
 constexpr int kOpsPerMac = 2;
 constexpr char kConst[] = "Const";
+constexpr char kGuaranteeConst[] = "GuaranteeConst";
 constexpr char kConv2d[] = "Conv2D";
 constexpr char kConv2dBackpropFilter[] = "Conv2DBackpropFilter";
 constexpr char kConv2dBackpropInput[] = "Conv2DBackpropInput";
 constexpr char kFusedConv2dBiasActivation[] = "FusedConv2DBiasActivation";
+constexpr char kDepthwiseConv2dNative[] = "DepthwiseConv2dNative";
+constexpr char kDepthwiseConv2dNativeBackpropFilter[] =
+    "DepthwiseConv2dNativeBackpropFilter";
+constexpr char kDepthwiseConv2dNativeBackpropInput[] =
+    "DepthwiseConv2dNativeBackpropInput";
 constexpr char kMatMul[] = "MatMul";
 constexpr char kSparseMatMul[] = "SparseMatMul";
 constexpr char kPlaceholder[] = "Placeholder";
 constexpr char kIdentity[] = "Identity";
+constexpr char kIdentityN[] = "IdentityN";
 constexpr char kRefIdentity[] = "RefIdentity";
 constexpr char kNoOp[] = "NoOp";
 constexpr char kReshape[] = "Reshape";
+constexpr char kSqueeze[] = "Squeeze";
 constexpr char kRecv[] = "_Recv";
 constexpr char kSend[] = "_Send";
 constexpr char kBatchMatMul[] = "BatchMatMul";
@@ -68,6 +76,14 @@ string GetDataFormat(const OpInfo& op_features) {
     data_format = op_features.attr().at("data_format").s();
   }
   return data_format;
+}
+
+string GetFilterFormat(const OpInfo& op_features) {
+  string filter_format = "HWIO";  // Default format.
+  if (op_features.attr().find("filter_format") != op_features.attr().end()) {
+    filter_format = op_features.attr().at("filter_format").s();
+  }
+  return filter_format;
 }
 
 Padding GetPadding(const OpInfo& op_features) {
@@ -122,33 +138,6 @@ int64 GetOutputSize(const int64 input, const int64 filter, const int64 stride,
   }
 }
 
-// Return a minimum shape if the shape is unknown. If known, return the original
-// shape.
-TensorShapeProto MaybeGetMinimumShape(const TensorShapeProto& original_shape,
-                                      int rank, bool* found_unknown_shapes) {
-  auto shape = original_shape;
-  if (shape.unknown_rank() || shape.dim_size() < rank) {
-    *found_unknown_shapes = true;
-    TensorShapeProto::Dim dim;
-    VLOG(2) << "Use minimum shape because the rank is unknown.";
-    // The size of each dimension is at least 1, if unknown.
-    dim.set_size(1);
-    for (int i = 0; i < rank; i++) {
-      *shape.add_dim() = dim;
-    }
-  } else {
-    for (int i = 0; i < shape.dim_size(); i++) {
-      if (shape.dim(i).size() < 0) {
-        *found_unknown_shapes = true;
-        VLOG(2) << "Use minimum dim size 1 because the shape is unknown.";
-        // The size of each dimension is at least 1, if unknown.
-        shape.mutable_dim(i)->set_size(1);
-      }
-    }
-  }
-  return shape;
-}
-
 // Return the output element count of a binary element-wise op considering
 // broadcasting.
 int64 CwiseOutputElementCount(const TensorShapeProto& input_shape_1,
@@ -180,6 +169,33 @@ int64 CwiseOutputElementCount(const TensorShapeProto& input_shape_1,
 
 }  // namespace
 
+// Return a minimum shape if the shape is unknown. If known, return the original
+// shape.
+TensorShapeProto MaybeGetMinimumShape(const TensorShapeProto& original_shape,
+                                      int rank, bool* found_unknown_shapes) {
+  auto shape = original_shape;
+  if (shape.unknown_rank() || shape.dim_size() < rank) {
+    *found_unknown_shapes = true;
+    TensorShapeProto::Dim dim;
+    VLOG(2) << "Use minimum shape because the rank is unknown.";
+    // The size of each dimension is at least 1, if unknown.
+    dim.set_size(1);
+    for (int i = 0; i < rank; i++) {
+      *shape.add_dim() = dim;
+    }
+  } else {
+    for (int i = 0; i < shape.dim_size(); i++) {
+      if (shape.dim(i).size() < 0) {
+        *found_unknown_shapes = true;
+        VLOG(2) << "Use minimum dim size 1 because the shape is unknown.";
+        // The size of each dimension is at least 1, if unknown.
+        shape.mutable_dim(i)->set_size(1);
+      }
+    }
+  }
+  return shape;
+}
+
 OpLevelCostEstimator::OpLevelCostEstimator() {
   // Syntactic sugar to build and return a lambda that takes an OpInfo and
   // returns a cost.
@@ -199,11 +215,20 @@ OpLevelCostEstimator::OpLevelCostEstimator() {
        wrap(&OpLevelCostEstimator::PredictConv2DBackpropInput)},
       {kFusedConv2dBiasActivation,
        wrap(&OpLevelCostEstimator::PredictFusedConv2DBiasActivation)},
+      // reuse Conv2D for DepthwiseConv2dNative because the caculation is the
+      // same although the actual meaning of the parameters are different. See
+      // comments in PredictConv2D and related functions
+      {kDepthwiseConv2dNative, wrap(&OpLevelCostEstimator::PredictConv2D)},
+      {kDepthwiseConv2dNativeBackpropFilter,
+       wrap(&OpLevelCostEstimator::PredictConv2DBackpropFilter)},
+      {kDepthwiseConv2dNativeBackpropInput,
+       wrap(&OpLevelCostEstimator::PredictConv2DBackpropInput)},
       {kMatMul, wrap(&OpLevelCostEstimator::PredictMatMul)},
       {kSparseMatMul, wrap(&OpLevelCostEstimator::PredictMatMul)},
       {kBatchMatMul, wrap(&OpLevelCostEstimator::PredictBatchMatMul)},
 
       {kNoOp, wrap(&OpLevelCostEstimator::PredictNoOp)},
+      {kGuaranteeConst, wrap(&OpLevelCostEstimator::PredictNoOp)},
 
       {kGather, wrap(&OpLevelCostEstimator::PredictGatherOrSlice)},
       {kGatherV2, wrap(&OpLevelCostEstimator::PredictGatherOrSlice)},
@@ -211,10 +236,12 @@ OpLevelCostEstimator::OpLevelCostEstimator() {
 
       {kPlaceholder, wrap(&OpLevelCostEstimator::PredictIdentity)},
       {kIdentity, wrap(&OpLevelCostEstimator::PredictIdentity)},
+      {kIdentityN, wrap(&OpLevelCostEstimator::PredictIdentity)},
       {kRefIdentity, wrap(&OpLevelCostEstimator::PredictIdentity)},
       {kStopGradient, wrap(&OpLevelCostEstimator::PredictIdentity)},
       {kPreventGradient, wrap(&OpLevelCostEstimator::PredictIdentity)},
       {kReshape, wrap(&OpLevelCostEstimator::PredictIdentity)},
+      {kSqueeze, wrap(&OpLevelCostEstimator::PredictIdentity)},
       {kRecv, wrap(&OpLevelCostEstimator::PredictIdentity)},
       {kSend, wrap(&OpLevelCostEstimator::PredictIdentity)},
 
@@ -494,29 +521,44 @@ OpLevelCostEstimator::ConvolutionDimensionsFromInputs(
     y_index = 3;
     channel_index = 1;
   } else {
+    // Use NHWC.
     x_index = 1;
     y_index = 2;
     channel_index = 3;
+  }
+  const string& filter_format = GetFilterFormat(op_features);
+  int filter_x_index, filter_y_index, in_channel_index, out_channel_index;
+  if (filter_format == "HWIO") {
+    filter_x_index = 0;
+    filter_y_index = 1;
+    in_channel_index = 2;
+    out_channel_index = 3;
+  } else {
+    // Use OIHW
+    filter_x_index = 2;
+    filter_y_index = 3;
+    in_channel_index = 1;
+    out_channel_index = 0;
   }
   int64 batch = image_shape.dim(0).size();
   int64 ix = image_shape.dim(x_index).size();
   int64 iy = image_shape.dim(y_index).size();
   int64 iz = image_shape.dim(channel_index).size();
-  int64 kx = filter_shape.dim(0).size();
-  int64 ky = filter_shape.dim(1).size();
+  int64 kx = filter_shape.dim(filter_x_index).size();
+  int64 ky = filter_shape.dim(filter_y_index).size();
   std::vector<int64> strides = GetStrides(op_features);
   const auto padding = GetPadding(op_features);
   int64 sx = strides[x_index];
   int64 sy = strides[y_index];
   int64 ox = GetOutputSize(ix, kx, sx, padding);
   int64 oy = GetOutputSize(iy, ky, sy, padding);
-  int64 oz = filter_shape.dim(3).size();
+  int64 oz = filter_shape.dim(out_channel_index).size();
   // Only check equality when both sizes are known (in other words, when
   // neither is set to a minimum dimension size of 1).
-  if (iz != 1 && filter_shape.dim(2).size() != 1) {
-    CHECK_EQ(iz, filter_shape.dim(2).size());
+  if (iz != 1 && filter_shape.dim(in_channel_index).size() != 1) {
+    CHECK_EQ(iz, filter_shape.dim(in_channel_index).size());
   } else {
-    iz = std::max<int64>(iz, filter_shape.dim(2).size());
+    iz = std::max<int64>(iz, filter_shape.dim(in_channel_index).size());
   }
   OpLevelCostEstimator::ConvolutionDimensions conv_dims = {
       batch, ix, iy, iz, kx, ky, oz, ox, oy, sx, sy, padding};
@@ -535,18 +577,30 @@ OpLevelCostEstimator::ConvolutionDimensionsFromInputs(
 int64 OpLevelCostEstimator::CountConv2DOperations(
     const OpInfo& op_features, ConvolutionDimensions* conv_info,
     bool* found_unknown_shapes) const {
-  if (op_features.op() != kConv2d) {
-    LOG(ERROR) << "Invalid Operation";
-    return 0;
-  }
+  DCHECK(op_features.op() == kConv2d ||
+         op_features.op() == kDepthwiseConv2dNative)
+      << "Invalid Operation: not Conv2D nor DepthwiseConv2dNative";
+
   ConvolutionDimensions conv_dims = ConvolutionDimensionsFromInputs(
       op_features.inputs(0).shape(), op_features.inputs(1).shape(), op_features,
       found_unknown_shapes);
 
+  //  in DepthwiseConv2dNative conv_dims.oz is actually the channel depth
+  //  multiplier; The effective output channel depth oz_effective is
+  //  conv_dims.iz * conv_dims.oz. thus # ops = N x H x W x oz_effective x 2RS.
+  //  Compare to Conv2D where # ops =  N x H x W x iz x oz x 2RS,
+  //  oz = oz_effective,  then Conv2D_ops / Depthwise_conv2d_native_ops = iz.
   int64 ops = conv_dims.batch;
   ops *= conv_dims.ox * conv_dims.oy;
   ops *= conv_dims.kx * conv_dims.ky;
-  ops *= conv_dims.iz * conv_dims.oz;
+  if (op_features.op() == kConv2d) {
+    ops *= conv_dims.iz * conv_dims.oz;
+  } else {
+    // To ensure output tensor dims to be correct for DepthwiseConv2DNative,
+    // although ops are the same as Conv2D.
+    conv_dims.oz *= conv_dims.iz;
+    ops *= conv_dims.oz;
+  }
   ops *= kOpsPerMac;
 
   if (conv_info != nullptr) {
@@ -793,7 +847,10 @@ int64 OpLevelCostEstimator::CountConv2DBackpropInputOperations(
     bool* found_unknown_shapes) const {
   int64 ops = 0;
 
-  DCHECK_EQ(kConv2dBackpropInput, op_features.op());
+  DCHECK(op_features.op() == kConv2dBackpropInput ||
+         op_features.op() == kDepthwiseConv2dNativeBackpropInput)
+      << "Invalid Operation: not kConv2dBackpropInput nor"
+         "kDepthwiseConv2dNativeBackpropInput";
 
   if (op_features.inputs_size() < 2) {
     *found_unknown_shapes = true;
@@ -826,10 +883,16 @@ int64 OpLevelCostEstimator::CountConv2DBackpropInputOperations(
   ops = conv_dims.batch;
   ops *= conv_dims.ox * conv_dims.oy;
   ops *= conv_dims.kx * conv_dims.ky;
-  ops *= conv_dims.iz * conv_dims.oz;
+  if (op_features.op() == kConv2dBackpropInput) {
+    ops *= conv_dims.iz * conv_dims.oz;
+  } else {
+    // conv_dims always use forward path definition regardless
+    conv_dims.oz *= conv_dims.iz;
+    ops *= conv_dims.oz;
+  }
   ops *= kOpsPerMac;
 
-  VLOG(1) << "Operations for Conv2DBackpropInput " << ops;
+  VLOG(1) << "Operations for" << op_features.op() << "  " << ops;
 
   if (returned_conv_dims != nullptr) {
     *returned_conv_dims = conv_dims;
@@ -841,7 +904,11 @@ int64 OpLevelCostEstimator::CountConv2DBackpropFilterOperations(
     const OpInfo& op_features, ConvolutionDimensions* returned_conv_dims,
     bool* found_unknown_shapes) const {
   int64 ops = 0;
-  DCHECK_EQ(kConv2dBackpropFilter, op_features.op());
+
+  DCHECK(op_features.op() == kConv2dBackpropFilter ||
+         op_features.op() == kDepthwiseConv2dNativeBackpropFilter)
+      << "Invalid Operation: not kConv2dBackpropFilter nor"
+         "kDepthwiseConv2dNativeBackpropFilter";
 
   TensorShapeProto filter_shape;
   bool shape_found = false;
@@ -873,10 +940,15 @@ int64 OpLevelCostEstimator::CountConv2DBackpropFilterOperations(
   ops = conv_dims.batch;
   ops *= conv_dims.ox * conv_dims.oy;
   ops *= conv_dims.kx * conv_dims.ky;
-  ops *= conv_dims.iz * conv_dims.oz;
+  if (op_features.op() == kConv2dBackpropFilter) {
+    ops *= conv_dims.iz * conv_dims.oz;
+  } else {
+    // conv_dims always use forward path definition regardless
+    conv_dims.oz *= conv_dims.iz;
+    ops *= conv_dims.oz;
+  }
   ops *= kOpsPerMac;
-
-  VLOG(1) << "Operations for Conv2DBackpropFilter" << ops;
+  VLOG(1) << "Operations for" << op_features.op() << "  " << ops;
 
   if (returned_conv_dims != nullptr) {
     *returned_conv_dims = conv_dims;
@@ -1005,6 +1077,24 @@ Costs OpLevelCostEstimator::PredictFusedConv2DBiasActivation(
   //
   // For more information, see
   // contrib/fused_conv/kernels/fused_conv2d_bias_activation_op.cc
+
+  // TODO(yaozhang): Support other data formats (NCHW_VECT_C, NHWC_VECT_W) and
+  // filter formats (OIHW_VECT_I).
+  string data_format = GetDataFormat(op_context.op_info);
+  if (data_format != "NCHW" && data_format != "NHWC") {
+    LOG(WARNING) << "unsupported data format: " << data_format;
+    Costs cost = Costs::ZeroCosts();
+    cost.inaccurate = true;
+    return cost;
+  }
+  string filter_format = GetFilterFormat(op_context.op_info);
+  if (filter_format != "HWIO" && filter_format != "OIHW") {
+    LOG(WARNING) << "unsupported filter format: " << filter_format;
+    Costs cost = Costs::ZeroCosts();
+    cost.inaccurate = true;
+    return cost;
+  }
+
   auto& conv_input = op_context.op_info.inputs(0);
   auto& filter = op_context.op_info.inputs(1);
   auto& bias = op_context.op_info.inputs(2);
@@ -1020,28 +1110,12 @@ Costs OpLevelCostEstimator::PredictFusedConv2DBiasActivation(
 
   // Construct the shape of our output tensor from our convolution dimensions
   // and format, as it may not be available yet.
-  //
   // TODO(varomodt): should we centralize the Conv2D input/output shapes?
-  bool unknown_conv_format = false;
   OpInfo::TensorProperties output;
-  switch (GetConvolutionFormat(op_context)) {
-    case NCHW:
-      output =
-          DescribeTensor(DT_FLOAT, {dims.batch, dims.oz, dims.ox, dims.oy});
-      break;
-    case NHWC:
-      output =
-          DescribeTensor(DT_FLOAT, {dims.batch, dims.ox, dims.oy, dims.oz});
-      break;
-    default:
-      // TODO(b/77722245): support cost estimation for NCHW_VECT_C.
-      LOG(WARNING) << "unsupported data format: "
-                   << GetDataFormat(op_context.op_info)
-                   << " Defaulting to NHWC.";
-      output =
-          DescribeTensor(DT_FLOAT, {dims.batch, dims.ox, dims.oy, dims.oz});
-      unknown_conv_format = true;
-      break;
+  if (data_format == "NCHW") {
+    output = DescribeTensor(DT_FLOAT, {dims.batch, dims.oz, dims.ox, dims.oy});
+  } else if (data_format == "NHWC") {
+    output = DescribeTensor(DT_FLOAT, {dims.batch, dims.ox, dims.oy, dims.oz});
   }
 
   // Add the operations the fused op always computes.
@@ -1066,7 +1140,7 @@ Costs OpLevelCostEstimator::PredictFusedConv2DBiasActivation(
 
   // Construct component operations and run the cost computation.
   auto costs = PredictFusedOp(op_context_with_output, component_ops);
-  costs.inaccurate |= found_unknown_shapes || unknown_conv_format;
+  costs.inaccurate |= found_unknown_shapes;
   return costs;
 }
 
@@ -1519,20 +1593,6 @@ Costs OpLevelCostEstimator::PredictFusedBatchNormGrad(
 }
 
 /* static */
-OpLevelCostEstimator::ConvolutionFormat
-OpLevelCostEstimator::GetConvolutionFormat(const OpContext& op_context) {
-  auto data_format = GetDataFormat(op_context.op_info);
-  if (data_format == "NCHW") {
-    return NCHW;
-  } else if (data_format == "NHWC") {
-    return NHWC;
-  } else if (data_format == "NCHW_VECT_C") {
-    return NCHW_VECT_C;
-  }
-
-  return UNKNOWN_CONVOLUTION_FORMAT;
-}
-
 void OpLevelCostEstimator::CombineCostsAndUpdateExecutionTime(
     Costs* costs) const {
   if (compute_memory_overlap_) {

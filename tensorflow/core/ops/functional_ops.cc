@@ -82,7 +82,7 @@ REGISTER_OP("If")
     .Input("input: Tin")
     .Output("output: Tout")
     .Attr("Tcond: type")
-    .Attr("Tin: list(type)")
+    .Attr("Tin: list(type) >= 0")
     .Attr("Tout: list(type)")
     .Attr("then_branch: func")
     .Attr("else_branch: func")
@@ -144,5 +144,31 @@ REGISTER_OP("For")
     .Attr("T: list(type) >= 0")
     .Attr("body: func")
     .SetShapeFn(shape_inference::UnknownShape);
+
+// TODO(b/73826847, b/37549631) Mark as stateful.
+REGISTER_OP("PartitionedCall")
+    .Input("args: Tin")
+    .Output("output: Tout")
+    .Attr("Tin: list(type) >= 0")
+    .Attr("Tout: list(type) >= 0")
+    .Attr("f: func")
+    .SetShapeFn(shape_inference::UnknownShape);
+
+// This op is used as a placeholder in If branch functions. It doesn't provide a
+// valid output when run, so must either be removed (e.g. replaced with a
+// function input) or guaranteed not to be used (e.g. if mirroring an
+// intermediate output needed for the gradient computation of the other branch).
+REGISTER_OP("FakeParam")
+    .Output("output: dtype")
+    .Attr("dtype: type")
+    .Attr("shape: shape")
+    .SetShapeFn([](InferenceContext* c) {
+      PartialTensorShape shape;
+      TF_RETURN_IF_ERROR(c->GetAttr("shape", &shape));
+      shape_inference::ShapeHandle out;
+      TF_RETURN_IF_ERROR(c->MakeShapeFromPartialTensorShape(shape, &out));
+      c->set_output(0, out);
+      return Status::OK();
+    });
 
 }  // end namespace tensorflow

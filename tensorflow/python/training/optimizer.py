@@ -34,9 +34,9 @@ from tensorflow.python.ops import resource_variable_ops
 from tensorflow.python.ops import state_ops
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.ops import variables
-from tensorflow.python.training import checkpointable
 from tensorflow.python.training import distribute as distribute_lib
 from tensorflow.python.training import slot_creator
+from tensorflow.python.training.checkpointable import base as checkpointable
 from tensorflow.python.util import nest
 from tensorflow.python.util.tf_export import tf_export
 
@@ -170,19 +170,6 @@ class _DenseResourceVariableProcessor(_OptimizableVariable):
       return update_op
 
 
-class _StreamingModelPortProcessor(_OptimizableVariable):
-  """Processor for streaming ModelPorts."""
-
-  def __init__(self, v):
-    self._v = v
-
-  def target(self):
-    return self._v
-
-  def update_op(self, optimizer, g):
-    return g
-
-
 class _TensorProcessor(_OptimizableVariable):
   """Processor for ordinary Tensors.
 
@@ -216,8 +203,6 @@ def _get_processor(v):
     return _DenseResourceVariableProcessor(v)
   if isinstance(v, variables.Variable):
     return _RefVariableProcessor(v)
-  if v.op.type == "SubmodelPort":
-    return _StreamingModelPortProcessor(v)
   if isinstance(v, ops.Tensor):
     return _TensorProcessor(v)
   raise NotImplementedError("Trying to optimize unsupported type ", v)
@@ -745,15 +730,15 @@ class Optimizer(
     if not named_slots:
       return None
 
-    if hasattr(var, "_mirrored_container"):
+    if hasattr(var, "_distributed_container"):
       # NOTE: If this isn't patched, then there is no `handle` in
       # `_resource_apply_dense`.
-      mirrored_container = var._mirrored_container()
-      assert mirrored_container is not None
+      distributed_container = var._distributed_container()
+      assert distributed_container is not None
       if context.executing_eagerly():
-        key = mirrored_container._unique_id
+        key = distributed_container._unique_id
       else:
-        key = (mirrored_container.graph, mirrored_container._shared_name)
+        key = (distributed_container.graph, distributed_container._shared_name)
       # pylint: enable=protected-access
       mirrored_slot = named_slots.get(key, None)
       if mirrored_slot is None: return None
@@ -854,7 +839,7 @@ class Optimizer(
 
   def _get_non_slot_variable(self, name, graph=None):
     non_slot = self._non_slot_dict.get((name, graph), None)
-    if hasattr(non_slot, "_mirrored_container"):
+    if hasattr(non_slot, "_distributed_container"):
       # This is a mirrored non-slot.  In order to enable code like `_finish`
       # to assign to a non-slot, return the current context replica.
       return non_slot.get()
@@ -1190,7 +1175,16 @@ class Optimizer(
     variable_key = _var_key(variable)
     slot_variable = named_slots.get(variable_key, None)
     if (slot_variable is None and context.executing_eagerly() and
-        slot_variable_position.is_simple_variable()):
+        slot_variable_position.is_simple_variable()
+        # Defer slot variable creation if there is an active variable creator
+        # scope. Generally we'd like to eagerly create/restore slot variables
+        # when possible, but this may mean that scopes intended to catch
+        # `variable` also catch its eagerly created slot variable
+        # unintentionally (specifically make_template would add a dependency on
+        # a slot variable if not for this case). Deferring is mostly harmless
+        # (aside from double initialization), and makes variable creator scopes
+        # behave the same way they do when graph building.
+        and not ops.get_default_graph()._variable_creator_stack):  # pylint: disable=protected-access
       initializer = checkpointable.CheckpointInitialValue(
           checkpoint_position=slot_variable_position)
       slot_variable = self._get_or_make_slot(
@@ -1217,3 +1211,7 @@ class Optimizer(
       self._deferred_slot_restorations.setdefault(
           slot_name, {}).setdefault(variable_key, []).append(
               slot_variable_position)
+
+  def _call_if_callable(self, param):
+    """Call the function if param is callable."""
+    return param() if callable(param) else param

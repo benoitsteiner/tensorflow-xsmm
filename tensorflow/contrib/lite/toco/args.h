@@ -227,16 +227,23 @@ struct ParsedTocoFlags {
   // TODO(aselle): command_line_flags  doesn't support doubles
   Arg<float> default_ranges_min = Arg<float>(0.);
   Arg<float> default_ranges_max = Arg<float>(0.);
+  Arg<float> default_int16_ranges_min = Arg<float>(0.);
+  Arg<float> default_int16_ranges_max = Arg<float>(0.);
   Arg<string> inference_type;
   Arg<string> inference_input_type;
   Arg<bool> drop_fake_quant = Arg<bool>(false);
   Arg<bool> reorder_across_fake_quant = Arg<bool>(false);
   Arg<bool> allow_custom_ops = Arg<bool>(false);
+  Arg<bool> quantize_weights = Arg<bool>(false);
   // Deprecated flags
   Arg<string> input_type;
   Arg<string> input_types;
   Arg<bool> debug_disable_recurrent_cell_fusion = Arg<bool>(false);
   Arg<bool> drop_control_dependency = Arg<bool>(false);
+  Arg<bool> propagate_fake_quant_num_bits = Arg<bool>(false);
+  Arg<bool> allow_nudging_weights_to_use_fast_gemm_kernel = Arg<bool>(false);
+  Arg<int64> dedupe_array_min_size_bytes = Arg<int64>(64);
+  Arg<bool> split_tflite_lstm_inputs = Arg<bool>(true);
 };
 
 }  // namespace toco

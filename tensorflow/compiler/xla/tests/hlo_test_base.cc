@@ -23,19 +23,17 @@ limitations under the License.
 #include "tensorflow/compiler/xla/layout_util.h"
 #include "tensorflow/compiler/xla/legacy_flags/debug_options_flags.h"
 #include "tensorflow/compiler/xla/ptr_util.h"
+#include "tensorflow/compiler/xla/service/hlo_parser.h"
 #include "tensorflow/compiler/xla/service/platform_util.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/tests/literal_test_util.h"
 #include "tensorflow/compiler/xla/tests/test_utils.h"
-#include "tensorflow/compiler/xla/tools/parser/hlo_parser.h"
 #include "tensorflow/compiler/xla/types.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
 #include "tensorflow/core/lib/gtl/array_slice.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/test.h"
 #include "tensorflow/core/platform/types.h"
-
-namespace se = ::perftools::gputools;
 
 namespace xla {
 
@@ -95,17 +93,15 @@ HloTestBase::HloTestBase(se::Platform* test_platform,
 }
 
 /* static */
-std::unique_ptr<HloModule> HloTestBase::CreateNewModule() {
-  HloModuleConfig config;
-  config.set_debug_options(GetDebugOptionsForTest());
-  return MakeUnique<HloModule>(TestName(), VersionedComputationHandle(),
-                               config);
+std::unique_ptr<HloModule> HloTestBase::CreateNewModule(const string& name) {
+  return MakeUnique<HloModule>(name, GetModuleConfigForTest());
 }
 
 /*static*/ DebugOptions HloTestBase::GetDebugOptionsForTest() {
   auto debug_options = legacy_flags::GetDebugOptionsFromFlags();
   // TODO(b/38354253): Change tests to use Parameters instead of Constants.
   debug_options.add_xla_disable_hlo_passes("constant_folding");
+  debug_options.set_xla_gpu_max_kernel_unroll_factor(1);
   return debug_options;
 }
 
@@ -115,11 +111,13 @@ StatusOr<std::unique_ptr<Literal>> HloTestBase::Execute(
   return test_runner_.Execute(std::move(module), arguments);
 }
 
-StatusOr<std::unique_ptr<Literal>> HloTestBase::ExecuteNoHloPasses(
+std::unique_ptr<Literal> HloTestBase::ExecuteNoHloPasses(
     std::unique_ptr<HloModule> module,
     tensorflow::gtl::ArraySlice<Literal*> arguments) {
-  return test_runner_.Execute(std::move(module), arguments,
-                              /*run_hlo_passes=*/false);
+  return test_runner_
+      .Execute(std::move(module), arguments,
+               /*run_hlo_passes=*/false)
+      .ValueOrDie();
 }
 
 std::unique_ptr<Literal> HloTestBase::ExecuteAndTransfer(
